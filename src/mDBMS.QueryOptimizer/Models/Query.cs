@@ -3,8 +3,7 @@ namespace mDBMS.QueryOptimizer.Models
     /// <summary>
     /// Enum type operasi query
     /// </summary>
-    public enum QueryType
-    {
+    public enum QueryType {
         SELECT,
         INSERT,
         UPDATE,
@@ -14,8 +13,7 @@ namespace mDBMS.QueryOptimizer.Models
     /// <summary>
     /// Tipe operasi JOIN
     /// </summary>
-    public enum JoinType
-    {
+    public enum JoinType {
         INNER,
         LEFT,
         RIGHT,
@@ -25,8 +23,7 @@ namespace mDBMS.QueryOptimizer.Models
     /// <summary>
     /// Operasi JOIN
     /// </summary>
-    public class JoinOperation
-    {
+    public class JoinOperation {
         public string LeftTable { get; set; } = string.Empty;
         public string RightTable { get; set; } = string.Empty;
         public string OnCondition { get; set; } = string.Empty;
