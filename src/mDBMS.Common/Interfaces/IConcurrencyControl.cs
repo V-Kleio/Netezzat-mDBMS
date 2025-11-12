@@ -1,6 +1,9 @@
 // Kita perlu 'using' Models yang sudah ada dan yang baru kita buat
 using mDBMS.Common.Models;
 
+using Response = mDBMS.Common.Models.CCM.Response;
+using Action = mDBMS.Common.Models.CCM.Action;
+
 namespace mDBMS.Common.Interfaces
 {
     /// <summary>

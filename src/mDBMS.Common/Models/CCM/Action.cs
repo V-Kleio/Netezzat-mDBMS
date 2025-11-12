@@ -1,4 +1,4 @@
-namespace mDBMS.Common.Models
+namespace mDBMS.Common.Models.CCM
 {
     /// <summary>
     /// DTO yang merepresentasikan sebuah aksi (read/write)
