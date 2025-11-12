@@ -22,9 +22,15 @@ namespace mDBMS.FailureRecovery
             Console.WriteLine($"[STUB FRM]: WriteLog dipanggil untuk kueri '{info.Query}'");
         }
 
-        public void Recover(RecoverCriteria criteria){}
+        public void Recover(RecoverCriteria criteria)
+        {
+            Console.WriteLine($"[STUB FRM]: Recover dipanggil untuk TransactionId '{criteria.TransactionId}' pada Timestamp '{criteria.Timestamp}'");
+        }
 
-        public void SaveCheckpoint(){}
+        public void SaveCheckpoint()
+        {
+            Console.WriteLine("[STUB FRM]: SaveCheckpoint dipanggil");
+        }
 
         public void WriteToBuffer(byte[] data){}
 
