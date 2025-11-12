@@ -38,7 +38,8 @@ namespace mDBMS.Common.Interfaces
         /// <summary>
         /// Mendapatkan informasi statistik dari sistem penyimpanan
         /// </summary>
+        /// <param name="table">Nama tabel</param>
         /// <returns>Objek yang berisi informasi statistik</returns>
-        Statistic GetStats();
+        Statistic GetStats(string table);
     }
 }
