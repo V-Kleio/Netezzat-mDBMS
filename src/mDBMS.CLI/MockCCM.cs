@@ -39,8 +39,8 @@ namespace mDBMS.CLI
             // Ini agar pengujian Grup QP dan SM tidak terhambat.
             return new Response
             {
-                allowed = true,
-                transaction_id = transaction_id
+                Allowed = true,
+                TransactionId = transaction_id
             };
         }
 
