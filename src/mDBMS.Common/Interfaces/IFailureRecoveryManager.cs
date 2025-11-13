@@ -1,7 +1,6 @@
-using mDBMS.Common.DTOs;
-using System;
+using mDBMS.Common.Transaction;
 
-namespace mDBMS.Common.Interfaces
+namespace mDBMS.Common.InterfacesManager
 {
     public interface IFailureRecovery
 	{
