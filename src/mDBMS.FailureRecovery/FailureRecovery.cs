@@ -32,10 +32,14 @@ namespace mDBMS.FailureRecovery
             Console.WriteLine("[STUB FRM]: SaveCheckpoint dipanggil");
         }
 
-        public void WriteToBuffer(byte[] data){}
+        public void WriteToBuffer(byte[] data)
+        {
+            Console.WriteLine($"[STUB FRM]: WriteToBuffer dipanggil, len={data?.Length ?? 0}");
+        }
 
         public byte[] ReadFromBuffer(int blockId){
-            return null;
+            Console.WriteLine($"[STUB FRM-BUFFER]: ReadFromBuffer dipanggil, blockId={blockId}");
+            return new byte[0]; // dummy return
         }
     }
 }
