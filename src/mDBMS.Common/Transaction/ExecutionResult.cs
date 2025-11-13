@@ -1,3 +1,5 @@
+using mDBMS.Common.Data;
+
 namespace mDBMS.Common.Transaction
 {
     /// <summary>
@@ -10,6 +12,7 @@ namespace mDBMS.Common.Transaction
         public bool Success { get; set; }
         public string Message { get; set; } = string.Empty;
         public DateTime ExecutedAt { get; set; }
+        public IEnumerable<Row>? Data { get; set; }
 
         public ExecutionResult()
         {
