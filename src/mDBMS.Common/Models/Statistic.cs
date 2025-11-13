@@ -8,4 +8,5 @@ public class Statistic
     public int TupleSize { get; set; }
     public int BlockingFactor { get; set; }
     public int DistinctValues { get; set; }
+    public IEnumerable<(string, IndexType)> Indices { get; set; } = [];
 }

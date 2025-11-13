@@ -2,14 +2,17 @@ namespace mDBMS.Common.Models;
 
 public class Condition
 {
-    public string Column { get; set; }
-    public string Operator { get; set; }
-    public object Value { get; set; }
+    public string lhs = "";
+    public string rhs = "";
+    public Operation opr;
 
-    public Condition(string column, string operatorSymbol, object value)
+    public enum Operation
     {
-        Column = column;
-        Operator = operatorSymbol;
-        Value = value;
+        EQ,
+        NEQ,
+        GT,
+        GEQ,
+        LT,
+        LEQ
     }
 }
