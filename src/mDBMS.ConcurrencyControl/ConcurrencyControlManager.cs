@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using mDBMS.Common.Interfaces;
-using mDBMS.Common.Models.CCM;
+using mDBMS.Common.Transaction;
 
 namespace mDBMS.ConcurrencyControl;
 
@@ -40,11 +40,11 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     /// <summary>
     /// Memvalidasi apakah aksi pada objek diizinkan
     /// </summary>
-    public Response ValidateObject(Common.Models.CCM.Action action)
+    public Response ValidateObject(Common.Transaction.Action action)
     {
         Console.WriteLine($"[STUB CCM]: ValidateObject dipanggil.");
         Console.WriteLine($" - Transaction ID: {action.TransactionId}");
-        Console.WriteLine($" - Action Type: {action.ActionType}");
+        Console.WriteLine($" - Action Type: {action.Type}");
         Console.WriteLine($" - Object: {action.DatabaseObject}");
         Console.WriteLine($" - Result: ALLOWED (stub always allows)");
 
@@ -52,7 +52,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
         return Response.CreateAllowed(
             action.TransactionId,
             action.DatabaseObject,
-            action.ActionType
+            action.Type
         );
     }
 
