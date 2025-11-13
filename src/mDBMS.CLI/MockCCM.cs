@@ -13,7 +13,7 @@ namespace mDBMS.CLI
     /// tanpa harus menunggu Grup CCM selesai.
     /// Sesuai Panduan Tugas Besar, Fase 1, Tugas 5.1 untuk Grup QP.
     /// </summary>
-    public class MockCCM : IConcurrencyControl
+    public class MockCCM : IConcurrencyControlManager
     {
         public int begin_transaction()
         {
