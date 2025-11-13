@@ -1,6 +1,7 @@
+// NOTICE: THERE ARE A FEW OF TODOS IN THIS FILE
 
 using mDBMS.Common.Interfaces;
-using mDBMS.Common.Models;
+using mDBMS.Common.Data;
 
 namespace mDBMS.StorageManager
 {
@@ -18,7 +19,7 @@ namespace mDBMS.StorageManager
             // stub untuk fase 1 - hanya mencetak pesan dan return dummy data
             Console.WriteLine($"[STUB SM]: ReadBlock dipanggil untuk tabel '{dataRetrieval.Table}'");
             Console.WriteLine($"[STUB SM]: Kolom yang diminta: {string.Join(", ", dataRetrieval.Columns)}");
-            Console.WriteLine($"[STUB SM]: Kondisi: {dataRetrieval.Condition ?? "tanpa kondisi"}");
+            // FIX THIS LATER: Console.WriteLine($"[STUB SM]: Kondisi: {dataRetrieval.Condition ?? "tanpa kondisi"}");
 
             // return data dummy yang hardcoded
             var dummyRows = new List<Row>();
@@ -69,7 +70,7 @@ namespace mDBMS.StorageManager
             // stub untuk fase 1 - hanya mencetak pesan dan return dummy value
             Console.WriteLine($"[STUB SM]: WriteBlock dipanggil untuk tabel '{dataWrite.Table}'");
             Console.WriteLine($"[STUB SM]: Data yang akan ditulis: {string.Join(", ", dataWrite.NewValues.Keys)}");
-            Console.WriteLine($"[STUB SM]: Kondisi: {dataWrite.Condition ?? "tanpa kondisi (insert)"}");
+            // FIX THIS LATER: Console.WriteLine($"[STUB SM]: Kondisi: {dataWrite.Condition ?? "tanpa kondisi (insert)"}");
 
             // return jumlah baris yang terpengaruh (dummy)
             int affectedRows = 1;
@@ -81,7 +82,7 @@ namespace mDBMS.StorageManager
         {
             // stub untuk fase 1 - hanya mencetak pesan dan return dummy value
             Console.WriteLine($"[STUB SM]: DeleteBlock dipanggil untuk tabel '{dataDeletion.Table}'");
-            Console.WriteLine($"[STUB SM]: Kondisi: {dataDeletion.Condition ?? "tanpa kondisi"}");
+            // FIX THIS LATER: Console.WriteLine($"[STUB SM]: Kondisi: {dataDeletion.Condition ?? "tanpa kondisi"}");
 
             // return jumlah baris yang dihapus (dummy)
             int deletedRows = 1;
@@ -97,7 +98,7 @@ namespace mDBMS.StorageManager
             Console.WriteLine($"[STUB SM]: Index berhasil dibuat (dummy)");
         }
 
-        public Statistic GetStats()
+        public Statistic GetStats(string tablename)
         {
             // stub untuk fase 1 - return statistik hardcoded sesuai data di file .dat
             Console.WriteLine($"[STUB SM]: GetStats dipanggil");
