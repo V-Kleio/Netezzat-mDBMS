@@ -7,24 +7,24 @@ namespace mDBMS.Common.Interfaces
     public interface IStorageManager
     {
         /// <summary>
-        /// Membaca satu atau beberapa blok data dari tabel sesuai kondisi pada data_retrieval
+        /// Membaca satu atau beberapa baris data dari tabel sesuai kondisi pada data_retrieval
         /// </summary>
         /// <param name="data_retrieval">Objek yang berisi kondisi untuk pembacaan data</param>
         /// <returns>Daftar baris yang dibaca dari tabel sesuai kondisi</returns>
         IEnumerable<Row> ReadBlock(DataRetrieval data_retrieval);
 
         /// <summary>
-        /// Menulis atau memperbarui satu atau beberapa blok data pada tabel sesuai kondisi pada data_write
+        /// Menulis atau memperbarui satu atau beberapa baris data pada tabel sesuai kondisi pada data_write
         /// </summary>
         /// <param name="data_write">Objek yang berisi data yang akan ditulis atau diperbarui dan kondisinya</param>
-        /// <returns>Jumlah blok yang berhasil ditulis atau diperbarui</returns>
+        /// <returns>Jumlah baris yang berhasil ditulis atau diperbarui</returns>
         int WriteBlock(DataWrite data_write);
 
         /// <summary>
-        /// Menghapus satu atau beberapa blok data dari tabel sesuai kondisi pada data_deletion
+        /// Menghapus satu atau beberapa baris data dari tabel sesuai kondisi pada data_deletion
         /// </summary>
         /// <param name="data_deletion">Objek yang berisi kondisi untuk penghapusan data</param>
-        /// <returns>Jumlah blok yang berhasil dihapus</returns>
+        /// <returns>Jumlah baris yang berhasil dihapus</returns>
         int DeleteBlock(DataDeletion data_deletion);
 
         /// <summary>
@@ -38,8 +38,8 @@ namespace mDBMS.Common.Interfaces
         /// <summary>
         /// Mendapatkan informasi statistik dari sistem penyimpanan
         /// </summary>
-        /// <param name="table">Nama tabel</param>
+        /// <param name="tableName">Nama tabel yang ingin diambil statistiknya</param>
         /// <returns>Objek yang berisi informasi statistik</returns>
-        Statistic GetStats(string table);
+        Statistic GetStats(string tableName);
     }
 }
