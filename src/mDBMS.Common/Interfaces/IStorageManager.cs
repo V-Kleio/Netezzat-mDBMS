@@ -1,6 +1,4 @@
-using System.Collections.Generic;
-using System.Data;
-using mDBMS.Common.Models;
+using mDBMS.Common.Data;
 
 namespace mDBMS.Common.Interfaces
 {

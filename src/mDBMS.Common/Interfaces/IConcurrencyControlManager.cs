@@ -1,7 +1,7 @@
-using mDBMS.Common.Models.CCM;
+using mDBMS.Common.Transaction;
 
-using Response = mDBMS.Common.Models.CCM.Response;
-using Action = mDBMS.Common.Models.CCM.Action;
+using Response = mDBMS.Common.Transaction.Response;
+using Action = mDBMS.Common.Transaction.Action;
 
 namespace mDBMS.Common.Interfaces;
 
