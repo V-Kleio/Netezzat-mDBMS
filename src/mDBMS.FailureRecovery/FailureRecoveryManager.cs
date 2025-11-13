@@ -1,12 +1,9 @@
-﻿using mDBMS.Common.DTOs;
+﻿using mDBMS.Common.Transaction;
 using mDBMS.Common.Interfaces;
-using System;
-
 
 namespace mDBMS.FailureRecovery
 {
-
-    public class FailureRecoveryManager : IFailureRecovery, IBufferManager
+    public class FailureRecoveryManager : IFailureRecoveryManager, IBufferManager
     {
         private readonly string _logFilePath = "mDBMS.log";
         private byte[] _buffer;
