@@ -27,7 +27,7 @@ namespace mDBMS.CLI
             Console.WriteLine($"[MOCK CCM]: log_object() dipanggil untuk Tx: {transaction_id}.");
         }
 
-        public Response validate_object(Row @object, int transaction_id, Common.Models.Action action)
+        public Response validate_object(Row @object, int transaction_id, mDBMS.Common.Models.CCM.Action action)
         {
             // Tulis pesan debug ke konsol
             Console.WriteLine($"[MOCK CCM]: validate_object() dipanggil untuk Tx: {transaction_id}, Aksi: {action.action}");
