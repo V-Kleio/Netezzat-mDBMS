@@ -1,4 +1,4 @@
-namespace mDBMS.Common.Models.CCM;
+namespace mDBMS.Common.Transaction;
 
 /// <summary>
 /// DTO yang merepresentasikan respons dari Concurrency Control Manager.
@@ -24,7 +24,7 @@ public class Response
     /// <summary>
     /// Tipe aksi yang divalidasi
     /// </summary>
-    public ActionType ActionType { get; set; }
+    public Action.ActionType ActionType { get; set; }
 
     /// <summary>
     /// Timestamp ketika respons diberikan
@@ -63,7 +63,7 @@ public class Response
     /// <summary>
     /// Factory method untuk membuat respons yang diizinkan
     /// </summary>
-    public static Response CreateAllowed(int transactionId, DatabaseObject? obj = null, ActionType actionType = ActionType.Read)
+    public static Response CreateAllowed(int transactionId, DatabaseObject? obj = null, Action.ActionType actionType = Action.ActionType.Read)
     {
         return new Response
         {
@@ -79,7 +79,7 @@ public class Response
     /// <summary>
     /// Factory method untuk membuat respons yang ditolak
     /// </summary>
-    public static Response CreateDenied(int transactionId, string reason, DatabaseObject? obj = null, ActionType actionType = ActionType.Read)
+    public static Response CreateDenied(int transactionId, string reason, DatabaseObject? obj = null, Action.ActionType actionType = Action.ActionType.Read)
     {
         return new Response
         {
@@ -95,7 +95,7 @@ public class Response
     /// <summary>
     /// Factory method untuk membuat respons dengan status waiting
     /// </summary>
-    public static Response CreateWaiting(int transactionId, string reason, DatabaseObject? obj = null, ActionType actionType = ActionType.Read)
+    public static Response CreateWaiting(int transactionId, string reason, DatabaseObject? obj = null, Action.ActionType actionType = Action.ActionType.Read)
     {
         return new Response
         {
@@ -114,5 +114,41 @@ public class Response
     public override string ToString()
     {
         return $"Response[TXN-{TransactionId}]: {Status} - {(Allowed ? "ALLOWED" : "DENIED")} ({Reason})";
+    }
+
+    /// <summary>
+    /// Enum yang mendefinisikan status respons dari CCM
+    /// </summary>
+    public enum ResponseStatus
+    {
+        /// <summary>
+        /// Aksi diizinkan dan lock telah diberikan
+        /// </summary>
+        Granted,
+    
+        /// <summary>
+        /// Aksi ditolak karena konflik dengan transaksi lain
+        /// </summary>
+        Denied,
+    
+        /// <summary>
+        /// Transaksi harus menunggu karena objek sedang digunakan
+        /// </summary>
+        Waiting,
+    
+        /// <summary>
+        /// Deadlock terdeteksi
+        /// </summary>
+        Deadlock,
+    
+        /// <summary>
+        /// Transaksi telah di-abort
+        /// </summary>
+        Aborted,
+    
+        /// <summary>
+        /// Error internal dalam CCM
+        /// </summary>
+        Error
     }
 }

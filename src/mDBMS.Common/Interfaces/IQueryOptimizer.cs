@@ -1,4 +1,5 @@
-using mDBMS.Common.Models;
+using mDBMS.Common.Selection;
+using mDBMS.Common.Data;
 namespace mDBMS.Common.Interfaces;
 
 public interface IQueryOptimizer

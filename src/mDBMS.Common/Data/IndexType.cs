@@ -1,4 +1,4 @@
-namespace mDBMS.Common.Models;
+namespace mDBMS.Common.Data;
 
 /// <summary>
 /// Specifies the type of index to use for database operations.

@@ -1,4 +1,4 @@
-namespace mDBMS.Common.Models;
+namespace mDBMS.Common.Data;
 
 public class DataRetrieval
 {

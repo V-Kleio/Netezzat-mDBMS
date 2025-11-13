@@ -1,6 +1,4 @@
-using System;
-
-namespace mDBMS.Common.DTOs
+namespace mDBMS.Common.Transaction
 {
     /// <summary>
     /// stub class untuk ExecutionResult

@@ -1,4 +1,4 @@
-namespace mDBMS.Common.Models.CCM;
+namespace mDBMS.Common.Transaction;
 
 /// <summary>
 /// DTO yang merepresentasikan sebuah aksi yang akan dilakukan pada objek database.
@@ -8,7 +8,7 @@ public class Action
     /// <summary>
     /// Tipe aksi yang akan dilakukan (Read atau Write)
     /// </summary>
-    public ActionType ActionType { get; set; }
+    public ActionType Type { get; set; }
 
     /// <summary>
     /// Objek database yang akan diakses
@@ -43,7 +43,7 @@ public class Action
     /// </summary>
     public Action(ActionType actionType, DatabaseObject databaseObject, int transactionId, string? additionalInfo = null)
     {
-        ActionType = actionType;
+        Type = actionType;
         DatabaseObject = databaseObject ?? throw new ArgumentNullException(nameof(databaseObject));
         TransactionId = transactionId;
         AdditionalInfo = additionalInfo;
@@ -72,4 +72,20 @@ public class Action
     // {
     //     return $"Action[TXN-{TransactionId}]: {ActionType} on {DatabaseObject}";
     // }
+
+    /// <summary>
+    /// Enum yang mendefinisikan tipe aksi yang dapat dilakukan pada objek database.
+    /// </summary>
+    public enum ActionType
+    {
+        /// <summary>
+        /// Operasi (SELECT, Read)
+        /// </summary>
+        Read,
+    
+        /// <summary>
+        /// Operasi (INSERT, UPDATE, DELETE)
+        /// </summary>
+        Write
+    }
 }

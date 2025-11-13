@@ -1,5 +1,4 @@
-using System.Collections.Generic;
-namespace mDBMS.Common.Models;
+namespace mDBMS.Common.Data;
 
 public class DataWrite
 {

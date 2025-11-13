@@ -1,4 +1,4 @@
-namespace mDBMS.Common.Interfaces;
+namespace mDBMS.Common.Selection;
 
 public interface ISelection
 {

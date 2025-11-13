@@ -1,5 +1,4 @@
-using mDBMS.Common.Interfaces;
-namespace mDBMS.Common.Models;
+namespace mDBMS.Common.Selection;
 
 public class TableNode : ISelection
 {

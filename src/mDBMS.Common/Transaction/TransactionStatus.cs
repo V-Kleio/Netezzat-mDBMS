@@ -1,4 +1,4 @@
-namespace mDBMS.Common.Models.CCM;
+namespace mDBMS.Common.Transaction;
 
 /// <summary>
 /// Enum yang mendefinisikan status transaksi

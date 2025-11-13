@@ -1,5 +1,4 @@
-using mDBMS.Common.Models;
-namespace mDBMS.Common.Interfaces;
+namespace mDBMS.Common.Selection;
 
 public interface ISelectionVisitor
 {
