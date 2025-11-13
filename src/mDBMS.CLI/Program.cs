@@ -2,11 +2,11 @@
 using mDBMS.QueryProcessor;
 using mDBMS.QueryProcessor.Contracts;
 
+var storageManager = new MockStorageManager();
 var optimizer = new MockQueryOptimizer();
 var concurrencyControl = new MockConcurrencyControlManager();
 var failureRecovery = new MockFailureRecovery();
-var queryProcessor = new QueryProcessor(optimizer, concurrencyControl, failureRecovery);
-
+var queryProcessor = new QueryProcessor(storageManager, optimizer, concurrencyControl, failureRecovery);
 Console.WriteLine("mDBMS CLI siap digunakan. Ketik EXIT untuk keluar.");
 
 while (true)
@@ -33,4 +33,14 @@ static void PrintResult(ExecutionResult result)
 {
     var status = result.Success ? "SUCCESS" : "ERROR";
     Console.WriteLine($"[{status}] {result.Message}");
+
+    if (result.Data != null)
+    {
+        Console.WriteLine("\nHasil:");
+        foreach (var row in result.Data)
+        {
+            Console.WriteLine(string.Join(" | ", row.Columns.Select(kv => $"{kv.Key}: {kv.Value}")));
+        }
+        Console.WriteLine();
+    }
 }
