@@ -11,6 +11,7 @@ namespace mDBMS.QueryProcessor
     /// </summary>
     public class QueryProcessor
     {
+        private readonly IStorageManager _storageManager;
         private readonly IQueryOptimizer _optimizer;
         private readonly IConcurrencyControl _concurrencyControl;
         private readonly IFailureRecovery _failureRecovery;
@@ -18,10 +19,12 @@ namespace mDBMS.QueryProcessor
         private int? _activeTransactionId;
 
         public QueryProcessor(
+            IStorageManager storageManager,
             IQueryOptimizer optimizer,
             IConcurrencyControl concurrencyControl,
             IFailureRecovery failureRecovery)
         {
+            _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
             _optimizer = optimizer ?? throw new ArgumentNullException(nameof(optimizer));
             _concurrencyControl = concurrencyControl ?? throw new ArgumentNullException(nameof(concurrencyControl));
             _failureRecovery = failureRecovery ?? throw new ArgumentNullException(nameof(failureRecovery));
@@ -59,6 +62,37 @@ namespace mDBMS.QueryProcessor
         {
             var parsed = _optimizer.ParseQuery(query);
             _optimizer.OptimizeQuery(parsed, Enumerable.Empty<Statistic>());
+
+            var upper = query.TrimStart().ToUpperInvariant();
+            if (upper.StartsWith("SELECT"))
+            {
+                var retrieval = new DataRetrieval("employee", new[] { "*" });
+                var rows = _storageManager.ReadBlock(retrieval);
+
+                return BuildResult(query, true, "Data berhasil diambil melalui Storage Manager.", rows);
+            }
+
+            if (upper.StartsWith("INSERT") || upper.StartsWith("UPDATE"))
+            {
+                var data = new Dictionary<string, object>
+                {
+                    ["example_col"] = "value"
+                };
+
+                var write = new DataWrite("employee", data);
+                var affected = _storageManager.WriteBlock(write);
+
+                return BuildResult(query, true, $"{affected} row(s) ditulis melalui Storage Manager.");
+            }
+
+            if (upper.StartsWith("DELETE"))
+            {
+                var deletion = new DataDeletion("employee");
+                var deleted = _storageManager.DeleteBlock(deletion);
+
+                return BuildResult(query, true, $"{deleted} row(s) dihapus melalui Storage Manager.");
+            }
+            
             return BuildResult(query, true, "Query berhasil diparse dan diteruskan ke Query Optimizer.");
         }
 
@@ -105,6 +139,7 @@ namespace mDBMS.QueryProcessor
             return result;
         }
 
+        // untuk result bukan select
         private static ExecutionResult BuildResult(string query, bool success, string message)
         {
             return new ExecutionResult
@@ -112,6 +147,19 @@ namespace mDBMS.QueryProcessor
                 Query = query,
                 Success = success,
                 Message = message
+
+            };
+        }
+        
+        // khusus untuk result select
+        private static ExecutionResult BuildResult(string query, bool success, string message, IEnumerable<Row> data)
+        {
+            return new ExecutionResult
+            {
+                Query = query,
+                Success = success,
+                Message = message,
+                Data = data
             };
         }
 
