@@ -1,4 +1,3 @@
-// Kita perlu 'using' Models yang sudah ada dan yang baru kita buat
 using mDBMS.Common.Models;
 
 using Response = mDBMS.Common.Models.CCM.Response;

@@ -2,6 +2,9 @@ using mDBMS.Common.Interfaces;
 using mDBMS.Common.Models;
 using System;
 
+using Response = mDBMS.Common.Models.CCM.Response;
+using Action = mDBMS.Common.Models.CCM.Action;
+
 namespace mDBMS.CLI
 {
     /// <summary>
@@ -16,7 +19,7 @@ namespace mDBMS.CLI
         {
             // Tulis pesan debug ke konsol
             Console.WriteLine("[MOCK CCM]: begin_transaction() dipanggil.");
-            
+
             // Kembalikan ID transaksi palsu
             return 12345;
         }
@@ -27,7 +30,7 @@ namespace mDBMS.CLI
             Console.WriteLine($"[MOCK CCM]: log_object() dipanggil untuk Tx: {transaction_id}.");
         }
 
-        public Response validate_object(Row @object, int transaction_id, Common.Models.Action action)
+        public Response validate_object(Row @object, int transaction_id, Action action)
         {
             // Tulis pesan debug ke konsol
             Console.WriteLine($"[MOCK CCM]: validate_object() dipanggil untuk Tx: {transaction_id}, Aksi: {action.action}");
