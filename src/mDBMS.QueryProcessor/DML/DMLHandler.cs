@@ -1,8 +1,6 @@
 using mDBMS.Common.Data;
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.Transaction;
-using System;
-using System.Collections.Generic;
 
 namespace mDBMS.QueryProcessor.DML
 {
