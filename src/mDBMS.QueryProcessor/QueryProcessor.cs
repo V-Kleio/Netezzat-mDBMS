@@ -2,7 +2,7 @@ using mDBMS.Common.Transaction;
 using mDBMS.Common.Data;
 using mDBMS.Common.Interfaces;
 
-namespace mDBMS.QueryProcessor
+namespace mDBMS.QueryProcessor : IQueryProcessor
 {
     /// <summary>
     /// kelas utama Query Processor untuk fase 1: parsing sederhana lalu routing ke komponen lain.
