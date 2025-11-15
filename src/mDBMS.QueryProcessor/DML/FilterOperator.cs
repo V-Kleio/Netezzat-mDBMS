@@ -5,8 +5,8 @@ namespace mDBMS.QueryProcessor.DML;
 
 class FilterOperator : Operator
 {
-    public FilterOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep)
-        : base(storageManager, queryPlanStep)
+    public FilterOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
+        : base(storageManager, queryPlanStep, localTableStorage)
     {
         // Inisialisasi state (Usahakan semua state dimuat dalam GetRows)
     }

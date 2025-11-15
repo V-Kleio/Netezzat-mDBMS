@@ -5,8 +5,8 @@ namespace mDBMS.QueryProcessor.DML;
 
 class NestedLoopJoinOperator : Operator
 {
-    public NestedLoopJoinOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep)
-        : base(storageManager, queryPlanStep)
+    public NestedLoopJoinOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
+        : base(storageManager, queryPlanStep, localTableStorage)
     {
         // Inisialisasi state (Usahakan semua state dimuat dalam GetRows)
     }

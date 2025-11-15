@@ -10,11 +10,13 @@ internal abstract class Operator
 {
     protected IStorageManager storageManager;
     protected QueryPlanStep queryPlanStep;
+    protected LocalTableStorage localTableStorage;
 
-    public Operator(IStorageManager storageManager, QueryPlanStep queryPlanStep)
+    public Operator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
     {
         this.storageManager = storageManager;
         this.queryPlanStep = queryPlanStep;
+        this.localTableStorage = localTableStorage;
     }
 
     /// <summary>

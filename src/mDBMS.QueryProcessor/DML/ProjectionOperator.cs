@@ -5,8 +5,8 @@ namespace mDBMS.QueryProcessor.DML;
 
 class ProjectionOperator : Operator
 {
-    public ProjectionOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep)
-        : base(storageManager, queryPlanStep)
+    public ProjectionOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
+        : base(storageManager, queryPlanStep, localTableStorage)
     {
         // Inisialisasi state (Usahakan semua state dimuat dalam GetRows)
     }
