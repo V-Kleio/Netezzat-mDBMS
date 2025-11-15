@@ -1,6 +1,9 @@
-using mDBMS.Common.Transaction;
-using mDBMS.Common.Data;
 using mDBMS.Common.Interfaces;
+using mDBMS.Common.Transaction;
+using mDBMS.QueryProcessor.DML;
+using mDBMS.QueryProcessor.Transaction;
+using System;
+using System.Collections.Generic;
 
 namespace mDBMS.QueryProcessor
 {
@@ -14,7 +17,9 @@ namespace mDBMS.QueryProcessor
         private readonly IConcurrencyControlManager _concurrencyControlManager;
         private readonly IFailureRecoveryManager _failureRecoveryManager;
 
-        private int? _activeTransactionId;
+        private readonly Dictionary<QueryClassification, IQueryHandler> _handlers;
+
+        public int? ActiveTransactionId { get; set; }
 
         public QueryProcessor(
             IStorageManager storageManager,
@@ -26,6 +31,14 @@ namespace mDBMS.QueryProcessor
             _queryOptimizer = queryOptimizer ?? throw new ArgumentNullException(nameof(queryOptimizer));
             _concurrencyControlManager = concurrencyControlManager ?? throw new ArgumentNullException(nameof(concurrencyControlManager));
             _failureRecoveryManager = failureRecoveryManager ?? throw new ArgumentNullException(nameof(failureRecoveryManager));
+
+            _handlers = new Dictionary<QueryClassification, IQueryHandler>
+            {
+                { QueryClassification.Dml, new DMLHandler(_storageManager, _queryOptimizer) },
+                { QueryClassification.TransactionBegin, new BeginTransactionHandler(this, _concurrencyControlManager) },
+                { QueryClassification.TransactionCommit, new CommitTransactionHandler(this, _concurrencyControlManager) },
+                { QueryClassification.TransactionAbort, new AbortTransactionHandler(this, _concurrencyControlManager) }
+            };
         }
 
         public ExecutionResult ExecuteQuery(string? query)
@@ -44,21 +57,18 @@ namespace mDBMS.QueryProcessor
             try
             {
                 var classification = Classify(normalizedQuery);
-                var result = classification switch
+                
+                if (_handlers.TryGetValue(classification, out var handler))
                 {
-                    QueryClassification.Dml => HandleDmlQuery(normalizedQuery),
-                    QueryClassification.TransactionBegin => HandleBeginTransaction(normalizedQuery),
-                    QueryClassification.TransactionCommit => HandleCommitTransaction(normalizedQuery),
-                    QueryClassification.TransactionAbort => HandleAbortTransaction(normalizedQuery),
-                    _ => new ExecutionResult()
-                    {
-                        Query = normalizedQuery,
-                        Success = false,
-                        Message = "Tipe query tidak dikenali atau belum didukung."
-                    }
-                };
+                    return LogAndReturn(handler.HandleQuery(normalizedQuery));
+                }
 
-                return LogAndReturn(result);
+                return LogAndReturn(new ExecutionResult()
+                {
+                    Query = normalizedQuery,
+                    Success = false,
+                    Message = "Tipe query tidak dikenali atau belum didukung."
+                });
             }
             catch (Exception ex)
             {
@@ -69,132 +79,6 @@ namespace mDBMS.QueryProcessor
                     Message = $"Terjadi kesalahan saat mengeksekusi query: {ex.Message}"
                 });
             }
-        }
-
-        private ExecutionResult HandleDmlQuery(string query)
-        {
-            var parsed = _queryOptimizer.ParseQuery(query);
-            _queryOptimizer.OptimizeQuery(parsed);
-
-            var upper = query.TrimStart().ToUpperInvariant();
-            if (upper.StartsWith("SELECT"))
-            {
-                var retrieval = new DataRetrieval("employee", new[] { "*" });
-                var rows = _storageManager.ReadBlock(retrieval);
-
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = true,
-                    Message = "Data berhasil diambil melalui Storage Manager.",
-                    Data = rows
-                };
-            }
-
-            if (upper.StartsWith("INSERT") || upper.StartsWith("UPDATE"))
-            {
-                var data = new Dictionary<string, object>
-                {
-                    ["example_col"] = "value"
-                };
-
-                var write = new DataWrite("employee", data);
-                var affected = _storageManager.WriteBlock(write);
-
-                return new ExecutionResult() 
-                {
-                    Query = query,
-                    Success = true,
-                    Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager."
-                };
-            }
-
-            if (upper.StartsWith("DELETE"))
-            {
-                var deletion = new DataDeletion("employee");
-                var deleted = _storageManager.DeleteBlock(deletion);
-
-                return new ExecutionResult() 
-                {
-                    Query = query,
-                    Success = true,
-                    Message = $"{deleted} row(s) dihapus melalui Storage Manager."
-                };
-            }
-
-            return new ExecutionResult()
-            {
-                Query = query,
-                Success = false,
-                Message = "Tipe DML query tidak dikenali atau belum didukung."
-            };
-        }
-
-        private ExecutionResult HandleBeginTransaction(string query)
-        {
-            if (_activeTransactionId.HasValue)
-            {
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = false,
-                    Message = $"Transaksi sudah aktif dengan ID {_activeTransactionId.Value}."
-                };
-            }
-
-            _activeTransactionId = _concurrencyControlManager.BeginTransaction();
-            return new ExecutionResult()
-            {
-                Query = query,
-                Success = true,
-                Message = $"Transaksi baru dimulai dengan ID {_activeTransactionId.Value}."
-            };
-        }
-
-        private ExecutionResult HandleCommitTransaction(string query)
-        {
-            if (!_activeTransactionId.HasValue)
-            {
-                return new ExecutionResult() 
-                {
-                    Query = query,
-                    Success = false,
-                    Message = "Tidak ada transaksi aktif yang bisa di-COMMIT."
-                };
-            }
-
-            var transactionId = _activeTransactionId.Value;
-            _concurrencyControlManager.EndTransaction(transactionId, true);
-            _activeTransactionId = null;
-            return new ExecutionResult()
-            {
-                Query = query,
-                Success = true,
-                Message = $"Transaksi {transactionId} berhasil di-COMMIT."
-            };
-        }
-
-        private ExecutionResult HandleAbortTransaction(string query)
-        {
-            if (!_activeTransactionId.HasValue)
-            {
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = false,
-                    Message = "Tidak ada transaksi aktif yang bisa di-ABORT."
-                };
-            }
-
-            var transactionId = _activeTransactionId.Value;
-            _concurrencyControlManager.EndTransaction(transactionId, false);
-            _activeTransactionId = null;
-            return new ExecutionResult()
-            {
-                Query = query,
-                Success = true,
-                Message = $"Transaksi {transactionId} telah di-ABORT."
-            };
         }
 
         private ExecutionResult LogAndReturn(ExecutionResult result)
