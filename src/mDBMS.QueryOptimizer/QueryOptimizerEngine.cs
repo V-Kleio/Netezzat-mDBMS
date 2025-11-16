@@ -24,8 +24,11 @@ namespace mDBMS.QueryOptimizer
         /// <returns>Representasi pohon dari query</returns>
         public Query ParseQuery(string queryString)
         {
-            Console.WriteLine($"[STUB QO]: ParseQuery dipanggil untuk kueri '{queryString}'");
-            return new Query();
+            var lexer = new SqlLexer(queryString);
+            var tokens = lexer.Tokenize();
+            var parser = new SqlParser(tokens);
+            var query = parser.ParseSelect();
+            return query;
         }
 
         /// <summary>
@@ -34,23 +37,31 @@ namespace mDBMS.QueryOptimizer
         /// <param name="query">Query yang akan dioptimalkan</param>
         /// <returns>Optimized query execution plan</returns>
         public QueryPlan OptimizeQuery(Query query) {
-            // TODO: Implementasi full query optimization
-            // Untuk sekarang, return basic plan
+            // Step 1: Aplikasikan aturan ekuivalensi aljabar relasional (heuristik)
+            var rewrittenQuery = QueryRewriter.ApplyHeuristicRules(query);
 
-            var plan = new QueryPlan {
-                OriginalQuery = query,
-                Strategy = OptimizerStrategy.COST_BASED
-            };
+            // Step 2: Generate plan alternatif berdasarkan query yang sudah di-rewrite
+            var alternativePlans = GenerateAlternativePlans(rewrittenQuery).ToList();
 
-            // Generate plan alternatif
-            var alternativePlans = GenerateAlternativePlans(query);
+            // Step 3: Tambahkan plan berbasis heuristik murni
+            var heuristicPlan = HeuristicOptimizer.ApplyHeuristicOptimization(rewrittenQuery, _storageManager);
+            alternativePlans.Add(heuristicPlan);
 
-            // Pilih plan dengan cost termurah
+            // Step 4: Pilih plan dengan cost termurah (cost-based optimization)
             var bestPlan = alternativePlans
                 .OrderBy(p => GetCost(p))
-                .FirstOrDefault() ?? plan;
+                .FirstOrDefault();
 
-            // Hitung cost akhir
+            if (bestPlan == null)
+            {
+                // Fallback: buat basic plan
+                bestPlan = new QueryPlan {
+                    OriginalQuery = query,
+                    Strategy = OptimizerStrategy.COST_BASED
+                };
+            }
+
+            // Step 5: Hitung cost akhir
             bestPlan.TotalEstimatedCost = GetCost(bestPlan);
 
             return bestPlan;
@@ -62,13 +73,16 @@ namespace mDBMS.QueryOptimizer
         /// <param name="plan">Query plan yang akan dihitung costnya</param>
         /// <returns>Estimasi cost dalam bentuk numerik</returns>
         public double GetCost(QueryPlan plan) {
-            // TODO: Implementasi sophisticated cost calculation
-            // Rumus: Total Cost = sum(CPU Cost + I/O Cost + Network Cost)
+            // Rumus dasar: Total Cost = sum(EstimatedStepCost)
+            // EstimatedStepCost dihitung oleh CostEstimator menggunakan statistik Storage Manager
 
             double totalCost = 0.0;
 
-            foreach (var step in plan.Steps) {
-                totalCost += _costEstimator.EstimateStepCost(step, plan.OriginalQuery);
+            for (int i = 0; i < plan.Steps.Count; i++) {
+                var step = plan.Steps[i];
+                var cost = _costEstimator.EstimateStepCost(step, plan.OriginalQuery);
+                step.EstimatedCost = cost;
+                totalCost += cost;
             }
 
             return totalCost;
@@ -146,9 +160,74 @@ namespace mDBMS.QueryOptimizer
         /// Generate plan dengan strategi index scan
         /// </summary>
         private QueryPlan? GenerateIndexScanPlan(Query query) {
-            // TODO: Memeriksa apakah ada index yang sesuai untuk query
-            // Untuk sekarang, return null sebagai placeholder
-            return null;
+            try {
+                if (string.IsNullOrWhiteSpace(query.Table)) return null;
+
+                var stats = _storageManager.GetStats(query.Table);
+                var indexedColumns = stats.Indices.Select(i => i.Item1).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                if (indexedColumns.Count == 0) return null;
+
+                var whereCols = SqlParserHelpers.ExtractPredicateColumns(query.WhereClause);
+                var orderCols = query.OrderBy?.Select(o => o.Column) ?? Enumerable.Empty<string>();
+
+                bool hasIndexForWhere = whereCols.Any(c => indexedColumns.Contains(c));
+                bool hasIndexForOrder = orderCols.Any(c => indexedColumns.Contains(c));
+
+                if (!hasIndexForWhere && !hasIndexForOrder) return null;
+
+                var plan = new QueryPlan {
+                    OriginalQuery = query,
+                    Strategy = OptimizerStrategy.COST_BASED
+                };
+
+                // Jika ada predicate yang selektif, gunakan INDEX_SEEK, else INDEX_SCAN
+                var useSeek = hasIndexForWhere && !string.IsNullOrWhiteSpace(query.WhereClause);
+
+                plan.Steps.Add(new QueryPlanStep {
+                    Order = 1,
+                    Operation = useSeek ? OperationType.INDEX_SEEK : OperationType.INDEX_SCAN,
+                    Description = useSeek
+                        ? $"Index seek on {query.Table} using predicate"
+                        : $"Index scan on {query.Table}",
+                    Table = query.Table,
+                    IndexUsed = whereCols.FirstOrDefault(c => indexedColumns.Contains(c)) ?? orderCols.FirstOrDefault(c => indexedColumns.Contains(c))
+                });
+
+                if (!string.IsNullOrWhiteSpace(query.WhereClause)) {
+                    plan.Steps.Add(new QueryPlanStep {
+                        Order = 2,
+                        Operation = OperationType.FILTER,
+                        Description = $"Apply filter: {query.WhereClause}",
+                        Table = query.Table
+                    });
+                }
+
+                if (query.SelectedColumns.Any()) {
+                    plan.Steps.Add(new QueryPlanStep {
+                        Order = plan.Steps.Count + 1,
+                        Operation = OperationType.PROJECTION,
+                        Description = $"Project columns: {string.Join(", ", query.SelectedColumns)}",
+                        Table = query.Table
+                    });
+                }
+
+                if (query.OrderBy != null && query.OrderBy.Any()) {
+                    // Jika ada index yang sesuai untuk order by, hindari sort eksplisit
+                    if (!hasIndexForOrder) {
+                        plan.Steps.Add(new QueryPlanStep {
+                            Order = plan.Steps.Count + 1,
+                            Operation = OperationType.SORT,
+                            Description = $"Sort by: {string.Join(", ", query.OrderBy.Select(o => o.Column + (o.IsAscending ? " ASC" : " DESC")))}",
+                            Table = query.Table
+                        });
+                    }
+                }
+
+                return plan;
+            } catch {
+                return null;
+            }
         }
 
         /// <summary>
