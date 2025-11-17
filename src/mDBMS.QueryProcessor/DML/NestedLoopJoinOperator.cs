@@ -58,10 +58,7 @@ class NestedLoopJoinOperator : Operator
 
                     foreach (var attribute in rightRow.Columns)
                     {
-                        if (!joinColumns.Contains((attribute.Key, attribute.Key)))
-                        {
-                            joinedRow[attribute.Key] = attribute.Value;
-                        }
+                        joinedRow[attribute.Key] = attribute.Value;
                     }
                     
                     yield return joinedRow;
@@ -73,6 +70,21 @@ class NestedLoopJoinOperator : Operator
     private IEnumerable<Row> FetchRows(string tablename, string[] columns)
     {
         // TODO: Refactor this to read all blocks when specifying which block to access becomes possible
-        return storageManager.ReadBlock(new(tablename, columns));
+        Statistic tableStats = storageManager.GetStats(tablename);
+        for (int i = 0; i < tableStats.BlockCount; i++)
+        {
+            IEnumerable<Row> rowsInBlock = storageManager.ReadBlock(new(tablename, columns));
+            foreach (Row rawRow in rowsInBlock)
+            {
+                Row row = new();
+
+                foreach (var attribute in rawRow.Columns)
+                {
+                    row[tablename + "." + attribute.Key] = attribute.Value;
+                }
+
+                yield return row;
+            }
+        }
     }
 }
