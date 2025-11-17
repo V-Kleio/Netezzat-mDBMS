@@ -1,5 +1,6 @@
 using mDBMS.Common.Data;
 using mDBMS.Common.Interfaces;
+using mDBMS.Common.QueryData;
 using mDBMS.Common.Transaction;
 
 namespace mDBMS.QueryProcessor.DML
@@ -30,18 +31,51 @@ namespace mDBMS.QueryProcessor.DML
 
         private ExecutionResult HandleSelect(string query)
         {
-            var parsed = _queryOptimizer.ParseQuery(query);
-            _queryOptimizer.OptimizeQuery(parsed);
+            Query parsedQuery = _queryOptimizer.ParseQuery(query);
+            QueryPlan queryPlan = _queryOptimizer.OptimizeQuery(parsedQuery);
 
-            var retrieval = new DataRetrieval("employee", new[] { "*" });
-            var rows = _storageManager.ReadBlock(retrieval);
+            LocalTableStorage storage = new LocalTableStorage();
+
+            foreach (QueryPlanStep step in queryPlan.Steps)
+            {
+                Operator? op = step.Operation switch
+                {
+                    OperationType.TABLE_SCAN => new TableScanOperator(_storageManager, step, storage),
+                    // OperationType.INDEX_SCAN
+                    // OperationType.INDEX_SEEK
+                    OperationType.FILTER => new FilterOperator(_storageManager, step, storage),
+                    OperationType.PROJECTION => new ProjectionOperator(_storageManager, step, storage),
+                    OperationType.NESTED_LOOP_JOIN => new NestedLoopJoinOperator(_storageManager, step, storage),
+                    // OperationType.HASH_JOIN => new HashJoinOperator(_storageManager, step, storage),
+                    // OperationType.MERGE_JOIN
+                    // OperationType.SORT
+                    // OperationType.AGGREGATION
+                    _ => null
+                };
+
+                if (op == null) return new ExecutionResult()
+                {
+                    Query = query,
+                    Success = false,
+                    Message = $"Operasi {step.Operation} untuk SELECT tidak didukung."
+                };
+
+                IEnumerable<Row> result = op.GetRows();
+
+                if (!op.usePreviousTable)
+                {
+                    storage.holdStorage = storage.lastResult;
+                }
+
+                storage.lastResult = result;
+            }
 
             return new ExecutionResult()
             {
                 Query = query,
                 Success = true,
-                Message = "Data berhasil diambil melalui Storage Manager.",
-                Data = rows
+                Message = $"",
+                Data = storage.lastResult
             };
         }
 
