@@ -11,6 +11,7 @@ internal abstract class Operator
     protected IStorageManager storageManager;
     protected QueryPlanStep queryPlanStep;
     protected LocalTableStorage localTableStorage;
+    public bool usePreviousTable = false;
 
     public Operator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
     {

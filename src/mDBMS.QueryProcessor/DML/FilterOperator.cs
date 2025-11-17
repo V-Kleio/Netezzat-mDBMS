@@ -9,6 +9,7 @@ class FilterOperator : Operator
         : base(storageManager, queryPlanStep, localTableStorage)
     {
         // Inisialisasi state (Usahakan semua state dimuat dalam GetRows)
+        this.usePreviousTable = true;
     }
 
     public override IEnumerable<Row> GetRows()
