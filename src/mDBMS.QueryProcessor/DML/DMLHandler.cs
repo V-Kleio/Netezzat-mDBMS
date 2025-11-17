@@ -17,55 +17,85 @@ namespace mDBMS.QueryProcessor.DML
 
         public ExecutionResult HandleQuery(string query)
         {
+            string upper = query.TrimStart().ToUpperInvariant();
+            return upper switch
+            {
+                "SELECT" => HandleSelect(query),
+                "INSERT" => HandleInsert(query),
+                "UPDATE" => HandleUpdate(query),
+                "DELETE" => HandleDelete(query),
+                _ => HandleUnrecognized(query)
+            };
+        }
+
+        private ExecutionResult HandleSelect(string query)
+        {
             var parsed = _queryOptimizer.ParseQuery(query);
             _queryOptimizer.OptimizeQuery(parsed);
 
-            var upper = query.TrimStart().ToUpperInvariant();
-            if (upper.StartsWith("SELECT"))
+            var retrieval = new DataRetrieval("employee", new[] { "*" });
+            var rows = _storageManager.ReadBlock(retrieval);
+
+            return new ExecutionResult()
             {
-                var retrieval = new DataRetrieval("employee", new[] { "*" });
-                var rows = _storageManager.ReadBlock(retrieval);
+                Query = query,
+                Success = true,
+                Message = "Data berhasil diambil melalui Storage Manager.",
+                Data = rows
+            };
+        }
 
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = true,
-                    Message = "Data berhasil diambil melalui Storage Manager.",
-                    Data = rows
-                };
-            }
-
-            if (upper.StartsWith("INSERT") || upper.StartsWith("UPDATE"))
+        private ExecutionResult HandleInsert(string query)
+        {
+            var data = new Dictionary<string, object>
             {
-                var data = new Dictionary<string, object>
-                {
-                    ["example_col"] = "value"
-                };
+                ["example_col"] = "value"
+            };
 
-                var write = new DataWrite("employee", data);
-                var affected = _storageManager.WriteBlock(write);
+            var write = new DataWrite("employee", data);
+            var affected = _storageManager.WriteBlock(write);
 
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = true,
-                    Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager."
-                };
-            }
-
-            if (upper.StartsWith("DELETE"))
+            return new ExecutionResult()
             {
-                var deletion = new DataDeletion("employee");
-                var deleted = _storageManager.DeleteBlock(deletion);
+                Query = query,
+                Success = true,
+                Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager."
+            };
+        }
 
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = true,
-                    Message = $"{deleted} row(s) dihapus melalui Storage Manager."
-                };
-            }
+        private ExecutionResult HandleUpdate(string query)
+        {
+            var data = new Dictionary<string, object>
+            {
+                ["example_col"] = "value"
+            };
 
+            var write = new DataWrite("employee", data);
+            var affected = _storageManager.WriteBlock(write);
+
+            return new ExecutionResult()
+            {
+                Query = query,
+                Success = true,
+                Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager."
+            };
+        }
+
+        private ExecutionResult HandleDelete(string query)
+        {
+            var deletion = new DataDeletion("employee");
+            var deleted = _storageManager.DeleteBlock(deletion);
+
+            return new ExecutionResult()
+            {
+                Query = query,
+                Success = true,
+                Message = $"{deleted} row(s) dihapus melalui Storage Manager."
+            };
+        }
+
+        private ExecutionResult HandleUnrecognized(string query)
+        {
             return new ExecutionResult()
             {
                 Query = query,
