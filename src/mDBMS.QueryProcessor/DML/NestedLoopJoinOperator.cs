@@ -28,7 +28,23 @@ class NestedLoopJoinOperator : Operator
             else
             {
                 lhs = localTableStorage.lastResult;
+                // TODO: Figure out how to fetch all columns
                 rhs = FetchRows(queryPlanStep.Table, []);
+            }
+
+            // TODO: Once available, use the join parameters given by the query plan step
+            Row leftSample = lhs.FirstOrDefault(new Row());
+            Row rightSample = rhs.FirstOrDefault(new Row());
+
+            foreach (string leftAttribute in leftSample.Columns.Keys)
+            {
+                foreach (string rightAttribute in rightSample.Columns.Keys)
+                {
+                    if (leftAttribute.Split('.').Last() == rightAttribute.Split('.').Last())
+                    {
+                        joinColumns.Add((leftAttribute, rightAttribute));
+                    }
+                }
             }
         }
 
@@ -77,7 +93,6 @@ class NestedLoopJoinOperator : Operator
             foreach (Row rawRow in rowsInBlock)
             {
                 Row row = new();
-
                 foreach (var attribute in rawRow.Columns)
                 {
                     row[tablename + "." + attribute.Key] = attribute.Value;
