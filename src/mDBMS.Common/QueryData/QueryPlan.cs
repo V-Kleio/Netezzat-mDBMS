@@ -59,6 +59,12 @@ public class QueryPlanStep {
     /// Perkiraan cost operasi
     /// </summary>
     public double EstimatedCost { get; set; }
+
+    /// <summary>
+    /// Parameter tambahan untuk step dalam bentuk key-value agar mudah diakses Query Processor.
+    /// Gunakan referensi kolom dalam bentuk fullname: table.column
+    /// </summary>
+    public Dictionary<string, object?> Parameters { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
