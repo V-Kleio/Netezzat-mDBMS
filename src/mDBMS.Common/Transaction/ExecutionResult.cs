@@ -1,6 +1,6 @@
-using System;
+using mDBMS.Common.Data;
 
-namespace mDBMS.Common.DTOs
+namespace mDBMS.Common.Transaction
 {
     /// <summary>
     /// stub class untuk ExecutionResult
@@ -12,6 +12,7 @@ namespace mDBMS.Common.DTOs
         public bool Success { get; set; }
         public string Message { get; set; }
         public DateTime ExecutedAt { get; set; }
+        public IEnumerable<Row>? Data { get; set; }
 
         public ExecutionResult()
         {
