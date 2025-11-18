@@ -1,5 +1,6 @@
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
+using System.Text.RegularExpressions;
 
 namespace mDBMS.QueryOptimizer
 {
@@ -128,7 +129,11 @@ namespace mDBMS.QueryOptimizer
                 Operation = OperationType.TABLE_SCAN,
                 Description = $"Full table scan on {query.Table}",
                 Table = query.Table,
-                EstimatedCost = 0.0 // Dihitung oleh CostEstimator
+                EstimatedCost = 0.0, // Dihitung oleh CostEstimator
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["table"] = query.Table
+                }
             });
 
             if (!string.IsNullOrEmpty(query.WhereClause))
@@ -138,7 +143,11 @@ namespace mDBMS.QueryOptimizer
                     Operation = OperationType.FILTER,
                     Description = $"Apply filter: {query.WhereClause}",
                     Table = query.Table,
-                    EstimatedCost = 0.0
+                    EstimatedCost = 0.0,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["predicate"] = QualifyPredicate(query.WhereClause!, query.Table)
+                    }
                 });
             }
 
@@ -149,7 +158,11 @@ namespace mDBMS.QueryOptimizer
                     Operation = OperationType.PROJECTION,
                     Description = $"Project columns: {string.Join(", ", query.SelectedColumns)}",
                     Table = query.Table,
-                    EstimatedCost = 0.0
+                    EstimatedCost = 0.0,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["columns"] = QualifyColumns(query.SelectedColumns, query.Table).ToList()
+                    }
                 });
             }
 
@@ -191,7 +204,13 @@ namespace mDBMS.QueryOptimizer
                         ? $"Index seek on {query.Table} using predicate"
                         : $"Index scan on {query.Table}",
                     Table = query.Table,
-                    IndexUsed = whereCols.FirstOrDefault(c => indexedColumns.Contains(c)) ?? orderCols.FirstOrDefault(c => indexedColumns.Contains(c))
+                    IndexUsed = whereCols.FirstOrDefault(c => indexedColumns.Contains(c)) ?? orderCols.FirstOrDefault(c => indexedColumns.Contains(c)),
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["table"] = query.Table,
+                        ["indexColumn"] = QualifyColumn(whereCols.FirstOrDefault(c => indexedColumns.Contains(c)) ?? orderCols.FirstOrDefault(c => indexedColumns.Contains(c)), query.Table),
+                        ["predicate"] = string.IsNullOrWhiteSpace(query.WhereClause) ? null : QualifyPredicate(query.WhereClause!, query.Table)
+                    }
                 });
 
                 if (!string.IsNullOrWhiteSpace(query.WhereClause)) {
@@ -199,7 +218,11 @@ namespace mDBMS.QueryOptimizer
                         Order = 2,
                         Operation = OperationType.FILTER,
                         Description = $"Apply filter: {query.WhereClause}",
-                        Table = query.Table
+                        Table = query.Table,
+                        Parameters = new Dictionary<string, object?>
+                        {
+                            ["predicate"] = QualifyPredicate(query.WhereClause!, query.Table)
+                        }
                     });
                 }
 
@@ -208,7 +231,11 @@ namespace mDBMS.QueryOptimizer
                         Order = plan.Steps.Count + 1,
                         Operation = OperationType.PROJECTION,
                         Description = $"Project columns: {string.Join(", ", query.SelectedColumns)}",
-                        Table = query.Table
+                        Table = query.Table,
+                        Parameters = new Dictionary<string, object?>
+                        {
+                            ["columns"] = QualifyColumns(query.SelectedColumns, query.Table).ToList()
+                        }
                     });
                 }
 
@@ -219,7 +246,15 @@ namespace mDBMS.QueryOptimizer
                             Order = plan.Steps.Count + 1,
                             Operation = OperationType.SORT,
                             Description = $"Sort by: {string.Join(", ", query.OrderBy.Select(o => o.Column + (o.IsAscending ? " ASC" : " DESC")))}",
-                            Table = query.Table
+                            Table = query.Table,
+                            Parameters = new Dictionary<string, object?>
+                            {
+                                ["orderBy"] = query.OrderBy.Select(o => new Dictionary<string, object?>
+                                {
+                                    ["column"] = QualifyColumn(o.Column, query.Table),
+                                    ["ascending"] = o.IsAscending
+                                }).ToList()
+                            }
                         });
                     }
                 }
@@ -246,7 +281,12 @@ namespace mDBMS.QueryOptimizer
                     Operation = OperationType.INDEX_SEEK,
                     Description = $"Filtered scan on {query.Table} with condition: {query.WhereClause}",
                     Table = query.Table,
-                    EstimatedCost = 0.0
+                    EstimatedCost = 0.0,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["table"] = query.Table,
+                        ["predicate"] = QualifyPredicate(query.WhereClause!, query.Table)
+                    }
                 });
             } else {
                 plan.Steps.Add(new QueryPlanStep {
@@ -254,7 +294,11 @@ namespace mDBMS.QueryOptimizer
                     Operation = OperationType.TABLE_SCAN,
                     Description = $"Table scan on {query.Table}",
                     Table = query.Table,
-                    EstimatedCost = 0.0
+                    EstimatedCost = 0.0,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["table"] = query.Table
+                    }
                 });
             }
 
@@ -264,13 +308,83 @@ namespace mDBMS.QueryOptimizer
                     Operation = OperationType.PROJECTION,
                     Description = $"Project columns: {string.Join(", ", query.SelectedColumns)}",
                     Table = query.Table,
-                    EstimatedCost = 0.0
+                    EstimatedCost = 0.0,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["columns"] = QualifyColumns(query.SelectedColumns, query.Table).ToList()
+                    }
                 });
             }
 
             return plan;
         }
 
+        #endregion
+
+        #region Qualification Helpers
+        // Pastikan referensi kolom memakai fullname: table.column
+        private static string QualifyColumn(string? column, string table)
+        {
+            if (string.IsNullOrWhiteSpace(column)) return string.Empty;
+            if (column.Contains('.')) return column; // sudah qualified
+            if (column == "*") return column;
+            return string.IsNullOrWhiteSpace(table) ? column : table + "." + column;
+        }
+
+        private static IEnumerable<string> QualifyColumns(IEnumerable<string> columns, string table)
+        {
+            foreach (var c in columns)
+            {
+                yield return QualifyColumn(c, table);
+            }
+        }
+
+        private static string QualifyPredicate(string predicate, string defaultTable)
+        {
+            if (string.IsNullOrWhiteSpace(predicate)) return predicate;
+
+            // Tandai rentang literal string agar tidak termodifikasi
+            var literalRanges = new List<(int start, int end)>();
+            foreach (Match lm in Regex.Matches(predicate, "'[^']*'"))
+            {
+                literalRanges.Add((lm.Index, lm.Index + lm.Length));
+            }
+
+            bool InLiteral(int index)
+            {
+                for (int i = 0; i < literalRanges.Count; i++)
+                {
+                    var r = literalRanges[i];
+                    if (index >= r.start && index < r.end) return true;
+                }
+                return false;
+            }
+
+            var keywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "AND","OR","NOT","IN","LIKE","BETWEEN","IS","NULL","TRUE","FALSE","ASC","DESC"
+            };
+
+            // Ganti identifier yang belum qualified menjadi table.identifier
+            string pattern = @"\b([A-Za-z_][A-Za-z0-9_]*)(\.[A-Za-z_][A-Za-z0-9_]*)?\b";
+            string result = Regex.Replace(predicate, pattern, m =>
+            {
+                // Lewati jika di dalam literal string
+                if (InLiteral(m.Index)) return m.Value;
+
+                var name = m.Groups[1].Value;
+                var hasDot = m.Groups[2].Success;
+
+                // Lewati jika keyword atau bernoktah (sudah qualified) atau angka
+                if (hasDot) return m.Value;
+                if (keywords.Contains(name)) return m.Value;
+                if (double.TryParse(m.Value, out _)) return m.Value;
+
+                return QualifyColumn(name, defaultTable);
+            });
+
+            return result;
+        }
         #endregion
     }
 }

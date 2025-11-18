@@ -1,4 +1,5 @@
 using mDBMS.Common.QueryData;
+using mDBMS.Common.Interfaces;
 using System.Text.RegularExpressions;
 
 namespace mDBMS.QueryOptimizer;
@@ -376,7 +377,7 @@ internal static class HeuristicOptimizer
     /// 4. Hindari Cartesian product jika memungkinkan
     /// 5. Gunakan index jika tersedia untuk seleksi dan join
     /// </summary>
-    public static QueryPlan ApplyHeuristicOptimization(Query query, IStorageManager storageManager)
+    public static QueryPlan ApplyHeuristicOptimization(Query query, mDBMS.Common.Interfaces.IStorageManager storageManager)
     {
         var plan = new QueryPlan
         {
@@ -400,7 +401,12 @@ internal static class HeuristicOptimizer
                 Operation = OperationType.INDEX_SEEK,
                 Description = $"Early selection with filter: {query.WhereClause}",
                 Table = query.Table,
-                EstimatedCost = 0.0
+                EstimatedCost = 0.0,
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["table"] = query.Table,
+                    ["predicate"] = QualificationHelpers.QualifyPredicate(query.WhereClause!, query.Table)
+                }
             });
         }
         else
@@ -411,7 +417,11 @@ internal static class HeuristicOptimizer
                 Operation = OperationType.TABLE_SCAN,
                 Description = $"Scan {query.Table}",
                 Table = query.Table,
-                EstimatedCost = 0.0
+                EstimatedCost = 0.0,
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["table"] = query.Table
+                }
             });
         }
 
@@ -432,7 +442,13 @@ internal static class HeuristicOptimizer
                     Operation = joinOp,
                     Description = $"{joinOp} between {join.LeftTable} and {join.RightTable} on {join.OnCondition}",
                     Table = join.RightTable,
-                    EstimatedCost = 0.0
+                    EstimatedCost = 0.0,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["leftTable"] = join.LeftTable,
+                        ["rightTable"] = join.RightTable,
+                        ["on"] = join.OnCondition
+                    }
                 });
             }
         }
@@ -447,7 +463,11 @@ internal static class HeuristicOptimizer
                 Operation = OperationType.PROJECTION,
                 Description = $"Project columns: {string.Join(", ", query.SelectedColumns)}",
                 Table = query.Table,
-                EstimatedCost = 0.0
+                EstimatedCost = 0.0,
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["columns"] = QualificationHelpers.QualifyColumns(query.SelectedColumns, query.Table).ToList()
+                }
             });
         }
 
@@ -460,7 +480,11 @@ internal static class HeuristicOptimizer
                 Operation = OperationType.AGGREGATION,
                 Description = $"Group by: {string.Join(", ", query.GroupBy)}",
                 Table = query.Table,
-                EstimatedCost = 0.0
+                EstimatedCost = 0.0,
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["groupBy"] = QualificationHelpers.QualifyColumns(query.GroupBy, query.Table).ToList()
+                }
             });
         }
 
@@ -473,7 +497,15 @@ internal static class HeuristicOptimizer
                 Operation = OperationType.SORT,
                 Description = $"Sort by: {string.Join(", ", query.OrderBy.Select(o => o.Column + (o.IsAscending ? " ASC" : " DESC")))}",
                 Table = query.Table,
-                EstimatedCost = 0.0
+                EstimatedCost = 0.0,
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["orderBy"] = query.OrderBy.Select(o => new Dictionary<string, object?>
+                    {
+                        ["column"] = QualificationHelpers.QualifyColumn(o.Column, query.Table),
+                        ["ascending"] = o.IsAscending
+                    }).ToList()
+                }
             });
         }
 
@@ -490,7 +522,7 @@ internal static class HeuristicOptimizer
     /// 
     /// Join dapat di-reorder untuk menghasilkan intermediate result terkecil.
     /// </summary>
-    private static List<JoinOperation> OrderJoinsBySelectivity(List<JoinOperation> joins, IStorageManager storageManager)
+    private static List<JoinOperation> OrderJoinsBySelectivity(List<JoinOperation> joins, mDBMS.Common.Interfaces.IStorageManager storageManager)
     {
         // Estimasi size hasil join berdasarkan statistik tabel
         var joinWithEstimate = new List<(JoinOperation join, double estimatedSize)>();
@@ -529,7 +561,7 @@ internal static class HeuristicOptimizer
     /// - Jika salah satu tabel kecil: Hash Join
     /// - Default: Nested Loop Join
     /// </summary>
-    private static OperationType DetermineJoinAlgorithm(JoinOperation join, IStorageManager storageManager)
+    private static OperationType DetermineJoinAlgorithm(JoinOperation join, mDBMS.Common.Interfaces.IStorageManager storageManager)
     {
         try
         {
@@ -555,5 +587,66 @@ internal static class HeuristicOptimizer
         {
             return OperationType.NESTED_LOOP_JOIN;
         }
+    }
+}
+
+// Helper untuk kualifikasi nama kolom dan predicate ke bentuk table.column
+// Duplikat kecil dari helper di QueryOptimizerEngine untuk isolasi dan meminimalkan perubahan antar file.
+internal static class QualificationHelpers
+{
+    public static string QualifyColumn(string? column, string table)
+    {
+        if (string.IsNullOrWhiteSpace(column)) return string.Empty;
+        if (column.Contains('.')) return column; // sudah qualified
+        if (column == "*") return column;
+        return string.IsNullOrWhiteSpace(table) ? column : table + "." + column;
+    }
+
+    public static IEnumerable<string> QualifyColumns(IEnumerable<string> columns, string table)
+    {
+        foreach (var c in columns)
+        {
+            yield return QualifyColumn(c, table);
+        }
+    }
+
+    public static string QualifyPredicate(string predicate, string defaultTable)
+    {
+        if (string.IsNullOrWhiteSpace(predicate)) return predicate;
+
+        var literalRanges = new List<(int start, int end)>();
+        foreach (Match lm in Regex.Matches(predicate, "'[^']*'"))
+        {
+            literalRanges.Add((lm.Index, lm.Index + lm.Length));
+        }
+
+        bool InLiteral(int index)
+        {
+            for (int i = 0; i < literalRanges.Count; i++)
+            {
+                var r = literalRanges[i];
+                if (index >= r.start && index < r.end) return true;
+            }
+            return false;
+        }
+
+        var keywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "AND","OR","NOT","IN","LIKE","BETWEEN","IS","NULL","TRUE","FALSE","ASC","DESC"
+        };
+
+        string pattern = @"\b([A-Za-z_][A-Za-z0-9_]*)(\.[A-Za-z_][A-Za-z0-9_]*)?\b";
+        string result = Regex.Replace(predicate, pattern, m =>
+        {
+            if (InLiteral(m.Index)) return m.Value;
+            var name = m.Groups[1].Value;
+            var hasDot = m.Groups[2].Success;
+            if (hasDot) return m.Value;
+            if (keywords.Contains(name)) return m.Value;
+            if (double.TryParse(m.Value, out _)) return m.Value;
+            return QualifyColumn(name, defaultTable);
+        });
+
+        return result;
     }
 }
