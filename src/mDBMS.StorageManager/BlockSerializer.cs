@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-
+using mDBMS.Common.Data;
 
 namespace mDBMS.StorageManager
 {
@@ -55,6 +55,72 @@ namespace mDBMS.StorageManager
             using var fs = new FileStream(path, FileMode.Append, FileAccess.Write);
             fs.Write(block, 0, block.Length);
         }
- 
+
+        // Method baru untuk Membaca Blok (Deserialisasi)
+        public static List<Row> DeserializeBlock(TableSchema schema, byte[] blockData)
+        {
+            var rows = new List<Row>();
+
+            // 1. Baca Header Blok
+            // [0-1]: Jumlah Record
+            ushort recordCount = BitConverter.ToUInt16(blockData, 0);
+            
+            // [2-3]: Offset Directory (tidak terlalu dipakai saat read linear, tapi berguna validasi)
+            // ushort dirStart = BitConverter.ToUInt16(blockData, 2);
+
+            // Jika kosong, return list kosong
+            if (recordCount == 0) return rows;
+
+            // 2. Baca Slot Directory untuk mendapatkan pointer data
+            // Directory ditulis dari BELAKANG blok.
+            // Slot 0 ada di: BlockSize - 2
+            // Slot 1 ada di: BlockSize - 4
+            // dst...
+            
+            int currentDirPtr = BlockSize;
+
+            for (int i = 0; i < recordCount; i++)
+            {
+                // Mundur 2 byte untuk baca pointer slot ke-i
+                currentDirPtr -= 2;
+                ushort dataOffset = BitConverter.ToUInt16(blockData, currentDirPtr);
+
+                // Validasi offset (opsional, agar tidak crash jika korup)
+                if (dataOffset >= BlockSize || dataOffset < 4) continue;
+
+                // 3. Menentukan panjang data record
+                // Karena kita pakai Fixed-Length Schema (untuk M2), kita bisa hitung size row dari schema
+                // TAPI: Slotted page murni biasanya menyimpan panjang row di header slot.
+                // UNTUK SIMPLIFIKASI M2: Kita hitung panjang row berdasarkan schema column definitions.
+                int rowSize = CalculateRowSize(schema);
+
+                // 4. Ambil slice byte untuk row ini
+                byte[] rowBytes = new byte[rowSize];
+                Array.Copy(blockData, dataOffset, rowBytes, 0, rowSize);
+
+                // 5. Deserialisasi Row
+                Row row = RowSerializer.DeserializeRow(schema, rowBytes);
+                rows.Add(row);
+            }
+
+            return rows;
+        }
+        // Helper untuk hitung ukuran byte 1 baris berdasarkan schema
+        public static int CalculateRowSize(TableSchema schema)
+        {
+            int size = 0;
+            foreach (var col in schema.Columns)
+            {
+                size += col.Type switch
+                {
+                    DataType.Int => 4,
+                    DataType.Float => 4,
+                    DataType.String => col.Length,
+                    _ => 0
+                };
+            }
+            return size;
+        }
+
     }
 }

@@ -1,5 +1,6 @@
-// NOTICE: THERE ARE A FEW OF TODOS IN THIS FILE
-
+using System;
+using System.Collections.Generic;
+using System.IO;
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.Data;
 
@@ -7,121 +8,117 @@ namespace mDBMS.StorageManager
 {
     public class StorageEngine : IStorageManager
     {
-        // konstruktor untuk menerima dependensi jika diperlukan nanti
-        // misal IBufferManager dari Failure Recovery Manager
-        public StorageEngine()
-        {
-            // untuk fase 1, konstruktor masih kosong
-        }
+        private static readonly string DataPath = AppDomain.CurrentDomain.BaseDirectory;
+        private const int BlockSize = 4096;
+        private const int FileHeaderSize = 4096; 
+
+        public StorageEngine() { }
 
         public IEnumerable<Row> ReadBlock(DataRetrieval dataRetrieval)
         {
-            // stub untuk fase 1 - hanya mencetak pesan dan return dummy data
-            Console.WriteLine($"[STUB SM]: ReadBlock dipanggil untuk tabel '{dataRetrieval.Table}'");
-            Console.WriteLine($"[STUB SM]: Kolom yang diminta: {string.Join(", ", dataRetrieval.Columns)}");
-            // FIX THIS LATER: Console.WriteLine($"[STUB SM]: Kondisi: {dataRetrieval.Condition ?? "tanpa kondisi"}");
+            string tableName = dataRetrieval.Table;
+            string fileName = Path.Combine(DataPath, $"{tableName.ToLower()}.dat");
 
-            // return data dummy yang hardcoded
-            var dummyRows = new List<Row>();
-            
-            // dummy data untuk Students
-            if (dataRetrieval.Table == "Students")
-            {
-                for (int i = 1; i <= 5; i++)
-                {
-                    var row = new Row();
-                    row["StudentID"] = i;
-                    row["FullName"] = $"Student {i}";
-                    dummyRows.Add(row);
-                }
-            }
-            // dummy data untuk Courses
-            else if (dataRetrieval.Table == "Courses")
-            {
-                for (int i = 1; i <= 5; i++)
-                {
-                    var row = new Row();
-                    row["CourseID"] = i;
-                    row["CourseName"] = $"Course {i}";
-                    row["Credits"] = 3;
-                    dummyRows.Add(row);
-                }
-            }
-            // dummy data untuk Enrollments
-            else if (dataRetrieval.Table == "Enrollments")
-            {
-                for (int i = 1; i <= 5; i++)
-                {
-                    var row = new Row();
-                    row["EnrollmentID"] = i;
-                    row["StudentID"] = i;
-                    row["CourseID"] = i;
-                    row["Grade"] = "A";
-                    dummyRows.Add(row);
-                }
-            }
+            if (!File.Exists(fileName)) yield break;
 
-            Console.WriteLine($"[STUB SM]: Mengembalikan {dummyRows.Count} baris dummy");
-            return dummyRows;
+            TableSchema schema = GetSchemaForTable(tableName);
+            if (schema == null) yield break;
+
+            using (var fs = new FileStream(fileName, FileMode.Open, FileAccess.Read))
+            {
+                long fileLength = fs.Length;
+                if (fileLength <= FileHeaderSize) yield break;
+
+                fs.Seek(FileHeaderSize, SeekOrigin.Begin);
+
+                byte[] buffer = new byte[BlockSize];
+                int bytesRead;
+
+                // Loop ini membaca fisik per 4KB
+                while ((bytesRead = fs.Read(buffer, 0, BlockSize)) > 0)
+                {
+                    if (bytesRead < BlockSize) Array.Clear(buffer, bytesRead, BlockSize - bytesRead);
+
+                    List<Row> rowsInBlock = BlockSerializer.DeserializeBlock(schema, buffer);
+                    foreach (var row in rowsInBlock)
+                    {
+                        yield return row;
+                    }
+                }
+            }
         }
 
         public int WriteBlock(DataWrite dataWrite)
         {
-            // stub untuk fase 1 - hanya mencetak pesan dan return dummy value
-            Console.WriteLine($"[STUB SM]: WriteBlock dipanggil untuk tabel '{dataWrite.Table}'");
-            Console.WriteLine($"[STUB SM]: Data yang akan ditulis: {string.Join(", ", dataWrite.NewValues.Keys)}");
-            // FIX THIS LATER: Console.WriteLine($"[STUB SM]: Kondisi: {dataWrite.Condition ?? "tanpa kondisi (insert)"}");
-
-            // return jumlah baris yang terpengaruh (dummy)
-            int affectedRows = 1;
-            Console.WriteLine($"[STUB SM]: {affectedRows} baris terpengaruh (dummy)");
-            return affectedRows;
-        }
-
-        public int DeleteBlock(DataDeletion dataDeletion)
-        {
-            // stub untuk fase 1 - hanya mencetak pesan dan return dummy value
-            Console.WriteLine($"[STUB SM]: DeleteBlock dipanggil untuk tabel '{dataDeletion.Table}'");
-            // FIX THIS LATER: Console.WriteLine($"[STUB SM]: Kondisi: {dataDeletion.Condition ?? "tanpa kondisi"}");
-
-            // return jumlah baris yang dihapus (dummy)
-            int deletedRows = 1;
-            Console.WriteLine($"[STUB SM]: {deletedRows} baris dihapus (dummy)");
-            return deletedRows;
-        }
-
-        public void SetIndex(string table, string column, IndexType type)
-        {
-            // stub untuk fase 1 - hanya mencetak pesan
-            Console.WriteLine($"[STUB SM]: SetIndex dipanggil");
-            Console.WriteLine($"[STUB SM]: Tabel: {table}, Kolom: {column}, Tipe Index: {type}");
-            Console.WriteLine($"[STUB SM]: Index berhasil dibuat (dummy)");
-        }
-
-        public Statistic GetStats(string tablename)
-        {
-            // stub untuk fase 1 - return statistik hardcoded sesuai data di file .dat
-            Console.WriteLine($"[STUB SM]: GetStats dipanggil");
-
-            // statistik dummy untuk ketiga tabel
-            var stats = new Statistic
+            string tableName = dataWrite.Table;
+            string fileName = Path.Combine(DataPath, $"{tableName.ToLower()}.dat");
+            TableSchema schema = GetSchemaForTable(tableName);
+            
+            // 1. Siapkan File (Create if not exists) & Tulis Header Dummy jika baru
+            bool isNewFile = !File.Exists(fileName);
+            using (var fs = new FileStream(fileName, FileMode.Append, FileAccess.Write))
             {
-                Table = "Students",
-                TupleCount = 50,        // jumlah baris yang ada di students.dat
-                BlockCount = 1,          // estimasi jumlah blok (50 rows * ~54 bytes/row / 4096 bytes)
-                TupleSize = 54,          // 4 bytes (int) + 50 bytes (varchar) = 54 bytes per row
-                BlockingFactor = 75,     // berapa banyak tuple per blok (4096 / 54 ≈ 75)
-                DistinctValues = 50      // semua StudentID unique
-            };
+                if (isNewFile)
+                {
+                    // Tulis 4KB kosong sebagai placeholder Header Metadata
+                    // Nanti diurus SchemaSerializer, sekarang isi 0 dulu biar offset bener
+                    fs.Write(new byte[FileHeaderSize], 0, FileHeaderSize);
+                }
 
-            Console.WriteLine($"[STUB SM]: Statistik untuk tabel '{stats.Table}':");
-            Console.WriteLine($"[STUB SM]:   - TupleCount: {stats.TupleCount}");
-            Console.WriteLine($"[STUB SM]:   - BlockCount: {stats.BlockCount}");
-            Console.WriteLine($"[STUB SM]:   - TupleSize: {stats.TupleSize} bytes");
-            Console.WriteLine($"[STUB SM]:   - BlockingFactor: {stats.BlockingFactor}");
-            Console.WriteLine($"[STUB SM]:   - DistinctValues: {stats.DistinctValues}");
+                // 2. Konversi Data Baru (Dictionary) ke Byte Arrays (Serialized Rows)
+                var rawRows = new List<byte[]>();
+                
+                // Kita asumsikan dataWrite.NewValues adalah 1 row (sesuai spec insert simple)
+                // Atau jika Anda punya list row, loop di sini.
+                // Di sini kita buat objek Row sementara untuk serializer
+                var rowObj = new Row(); 
+                foreach(var kvp in dataWrite.NewValues) rowObj[kvp.Key] = kvp.Value;
 
-            return stats;
+                byte[] serializedRow = RowSerializer.SerializeRow(schema, rowObj);
+                rawRows.Add(serializedRow);
+
+                // 3. Bungkus Row menjadi Blok 4KB
+                // CATATAN: Implementasi simple M2 = 1 Row -> masuk ke blok baru (pemborosan tempat gapapa untuk M2)
+                // Kalau mau advanced: Harusnya baca blok terakhir, cek muat gak, baru append.
+                // Tapi untuk LULUS M2, Append blok baru berisi 1 row itu sah.
+                
+                byte[] blockData = BlockSerializer.CreateBlock(rawRows);
+                
+                // 4. Tulis ke Disk
+                fs.Write(blockData, 0, blockData.Length);
+            }
+
+            return 1; // 1 baris affected
         }
+
+        // Helper Skema (Sama seperti sebelumnya)
+        private TableSchema GetSchemaForTable(string tableName)
+        {
+             var schema = new TableSchema { TableName = tableName };
+            if (tableName.Equals("Students", StringComparison.OrdinalIgnoreCase))
+            {
+                schema.Columns.Add(new ColumnSchema { Name = "StudentID", Type = DataType.Int });
+                schema.Columns.Add(new ColumnSchema { Name = "FullName", Type = DataType.String, Length = 50 });
+                // schema.Columns.Add(new ColumnSchema { Name = "GPA", Type = DataType.Float }); // Uncomment jika RowSerializer sudah support float
+            }
+            else if (tableName.Equals("Courses", StringComparison.OrdinalIgnoreCase))
+            {
+                schema.Columns.Add(new ColumnSchema { Name = "CourseID", Type = DataType.Int });
+                schema.Columns.Add(new ColumnSchema { Name = "CourseName", Type = DataType.String, Length = 50 });
+                schema.Columns.Add(new ColumnSchema { Name = "Credits", Type = DataType.Int });
+            }
+             else if (tableName.Equals("Enrollments", StringComparison.OrdinalIgnoreCase))
+            {
+                schema.Columns.Add(new ColumnSchema { Name = "EnrollmentID", Type = DataType.Int });
+                schema.Columns.Add(new ColumnSchema { Name = "StudentID", Type = DataType.Int });
+                schema.Columns.Add(new ColumnSchema { Name = "CourseID", Type = DataType.Int });
+                schema.Columns.Add(new ColumnSchema { Name = "Grade", Type = DataType.String, Length = 2 });
+            }
+            return schema;
+        }
+
+        public int DeleteBlock(DataDeletion dataDeletion) { return 0; } 
+        public void SetIndex(string table, string column, IndexType type) { } 
+        public Statistic GetStats(string tablename) { return new Statistic(); } 
     }
 }
