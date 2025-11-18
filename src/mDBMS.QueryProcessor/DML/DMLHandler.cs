@@ -1,5 +1,6 @@
 using mDBMS.Common.Data;
 using mDBMS.Common.Interfaces;
+using mDBMS.Common.QueryData;
 using mDBMS.Common.Transaction;
 
 namespace mDBMS.QueryProcessor.DML
@@ -17,55 +18,118 @@ namespace mDBMS.QueryProcessor.DML
 
         public ExecutionResult HandleQuery(string query)
         {
-            var parsed = _queryOptimizer.ParseQuery(query);
-            _queryOptimizer.OptimizeQuery(parsed);
-
-            var upper = query.TrimStart().ToUpperInvariant();
-            if (upper.StartsWith("SELECT"))
+            string upper = query.TrimStart().ToUpperInvariant();
+            return upper switch
             {
-                var retrieval = new DataRetrieval("employee", new[] { "*" });
-                var rows = _storageManager.ReadBlock(retrieval);
+                "SELECT" => HandleSelect(query),
+                "INSERT" => HandleInsert(query),
+                "UPDATE" => HandleUpdate(query),
+                "DELETE" => HandleDelete(query),
+                _ => HandleUnrecognized(query)
+            };
+        }
 
-                return new ExecutionResult()
+        private ExecutionResult HandleSelect(string query)
+        {
+            Query parsedQuery = _queryOptimizer.ParseQuery(query);
+            QueryPlan queryPlan = _queryOptimizer.OptimizeQuery(parsedQuery);
+
+            LocalTableStorage storage = new LocalTableStorage();
+
+            foreach (QueryPlanStep step in queryPlan.Steps)
+            {
+                Operator? op = step.Operation switch
+                {
+                    OperationType.TABLE_SCAN => new TableScanOperator(_storageManager, step, storage),
+                    // OperationType.INDEX_SCAN
+                    // OperationType.INDEX_SEEK
+                    OperationType.FILTER => new FilterOperator(_storageManager, step, storage),
+                    OperationType.PROJECTION => new ProjectionOperator(_storageManager, step, storage),
+                    OperationType.NESTED_LOOP_JOIN => new NestedLoopJoinOperator(_storageManager, step, storage),
+                    // OperationType.HASH_JOIN => new HashJoinOperator(_storageManager, step, storage),
+                    // OperationType.MERGE_JOIN
+                    // OperationType.SORT
+                    // OperationType.AGGREGATION
+                    _ => null
+                };
+
+                if (op == null) return new ExecutionResult()
                 {
                     Query = query,
-                    Success = true,
-                    Message = "Data berhasil diambil melalui Storage Manager.",
-                    Data = rows
+                    Success = false,
+                    Message = $"Operasi {step.Operation} untuk SELECT tidak didukung."
                 };
+
+                IEnumerable<Row> result = op.GetRows();
+
+                if (!op.usePreviousTable)
+                {
+                    storage.holdStorage = storage.lastResult;
+                }
+
+                storage.lastResult = result;
             }
 
-            if (upper.StartsWith("INSERT") || upper.StartsWith("UPDATE"))
+            return new ExecutionResult()
             {
-                var data = new Dictionary<string, object>
-                {
-                    ["example_col"] = "value"
-                };
+                Query = query,
+                Success = true,
+                Message = $"",
+                Data = storage.lastResult
+            };
+        }
 
-                var write = new DataWrite("employee", data);
-                var affected = _storageManager.WriteBlock(write);
-
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = true,
-                    Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager."
-                };
-            }
-
-            if (upper.StartsWith("DELETE"))
+        private ExecutionResult HandleInsert(string query)
+        {
+            var data = new Dictionary<string, object>
             {
-                var deletion = new DataDeletion("employee");
-                var deleted = _storageManager.DeleteBlock(deletion);
+                ["example_col"] = "value"
+            };
 
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = true,
-                    Message = $"{deleted} row(s) dihapus melalui Storage Manager."
-                };
-            }
+            var write = new DataWrite("employee", data);
+            var affected = _storageManager.WriteBlock(write);
 
+            return new ExecutionResult()
+            {
+                Query = query,
+                Success = true,
+                Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager."
+            };
+        }
+
+        private ExecutionResult HandleUpdate(string query)
+        {
+            var data = new Dictionary<string, object>
+            {
+                ["example_col"] = "value"
+            };
+
+            var write = new DataWrite("employee", data);
+            var affected = _storageManager.WriteBlock(write);
+
+            return new ExecutionResult()
+            {
+                Query = query,
+                Success = true,
+                Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager."
+            };
+        }
+
+        private ExecutionResult HandleDelete(string query)
+        {
+            var deletion = new DataDeletion("employee");
+            var deleted = _storageManager.DeleteBlock(deletion);
+
+            return new ExecutionResult()
+            {
+                Query = query,
+                Success = true,
+                Message = $"{deleted} row(s) dihapus melalui Storage Manager."
+            };
+        }
+
+        private ExecutionResult HandleUnrecognized(string query)
+        {
             return new ExecutionResult()
             {
                 Query = query,
