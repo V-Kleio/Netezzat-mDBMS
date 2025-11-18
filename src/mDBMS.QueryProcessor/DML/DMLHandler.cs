@@ -46,7 +46,7 @@ namespace mDBMS.QueryProcessor.DML
                     OperationType.FILTER => new FilterOperator(_storageManager, step, storage),
                     OperationType.PROJECTION => new ProjectionOperator(_storageManager, step, storage),
                     OperationType.NESTED_LOOP_JOIN => new NestedLoopJoinOperator(_storageManager, step, storage),
-                    // OperationType.HASH_JOIN => new HashJoinOperator(_storageManager, step, storage),
+                    OperationType.HASH_JOIN => new HashJoinOperator(_storageManager, step, storage),
                     // OperationType.MERGE_JOIN
                     // OperationType.SORT
                     // OperationType.AGGREGATION
