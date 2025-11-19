@@ -1,5 +1,8 @@
+using System;
+using System.Collections.Generic;
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.Transaction;
+using mDBMS.QueryProcessor.Algorithms;
 using mDBMS.QueryProcessor.DML;
 using mDBMS.QueryProcessor.Transaction;
 
@@ -14,6 +17,7 @@ namespace mDBMS.QueryProcessor
         private readonly IQueryOptimizer _queryOptimizer;
         private readonly IConcurrencyControlManager _concurrencyControlManager;
         private readonly IFailureRecoveryManager _failureRecoveryManager;
+        private readonly Algorithms.BasicTableScanOperator _tableScanner;
 
         private readonly Dictionary<QueryClassification, IQueryHandler> _handlers;
 
@@ -29,6 +33,7 @@ namespace mDBMS.QueryProcessor
             _queryOptimizer = queryOptimizer ?? throw new ArgumentNullException(nameof(queryOptimizer));
             _concurrencyControlManager = concurrencyControlManager ?? throw new ArgumentNullException(nameof(concurrencyControlManager));
             _failureRecoveryManager = failureRecoveryManager ?? throw new ArgumentNullException(nameof(failureRecoveryManager));
+            _tableScanner = new Algorithms.BasicTableScanOperator(_storageManager);
 
             _handlers = new Dictionary<QueryClassification, IQueryHandler>
             {
