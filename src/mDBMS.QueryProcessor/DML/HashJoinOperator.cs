@@ -1,6 +1,9 @@
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
 using mDBMS.Common.Data;
+using System.Text.RegularExpressions;
+using System.Linq;
+
 namespace mDBMS.QueryProcessor.DML;
 
 class HashJoinOperator : Operator
@@ -8,113 +11,131 @@ class HashJoinOperator : Operator
     public HashJoinOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
         : base(storageManager, queryPlanStep, localTableStorage)
     {
-        // Inisialisasi state (Usahakan semua state dimuat dalam GetRows)
         this.usePreviousTable = true;
     }
 
     public override IEnumerable<Row> GetRows()
     {
-        // 1. Siapkan Input Kiri (Build) dan Kanan (Probe)
         IEnumerable<Row> lhs = localTableStorage.lastResult;
         IEnumerable<Row> rhs;
 
         if (string.IsNullOrEmpty(queryPlanStep.Table))
         {
-            lhs = localTableStorage.holdStorage; // Input 1 (Pipeline)
-            rhs = localTableStorage.lastResult;  // Input 2 (Pipeline)
+            lhs = localTableStorage.holdStorage;
+            rhs = localTableStorage.lastResult;
         }
         else
         {
-            lhs = localTableStorage.lastResult;  // Input 1 (Pipeline)
-            rhs = FetchRows(queryPlanStep.Table); // Input 2 (Disk)
+            lhs = localTableStorage.lastResult;
+            rhs = FetchRows(queryPlanStep.Table);
         }
 
         if (lhs == null || rhs == null) yield break;
 
-        // 2. Materialize Build Side (Kiri) ke Memory
         var buildList = lhs.ToList();
         if (buildList.Count == 0) yield break;
 
-        // 3. Deteksi Key Join (Natural Join berdasarkan suffix nama kolom yang sama)
-        var sampleLeft = buildList.First();
-        var joinPairs = new List<(string lKey, string rKey)>();
-
-        // Kita perlu intip satu baris kanan untuk mencocokkan kolom
-        var rhsEnumerator = rhs.GetEnumerator();
-        if (!rhsEnumerator.MoveNext()) yield break; // Kanan kosong
-        var sampleRight = rhsEnumerator.Current;
-
-        foreach (var lKey in sampleLeft.Columns.Keys)
+        string? leftKeyCol = null; // Deklarasikan sebagai nullable
+        string? rightKeyCol = null; // Deklarasikan sebagai nullable
+        
+        // 1. Ambil Key Join dari Parameter "on" (Priority 1)
+        if (queryPlanStep.Parameters.TryGetValue("on", out var onObj) && onObj is string onCondition)
         {
-            foreach (var rKey in sampleRight.Columns.Keys)
+            (leftKeyCol, rightKeyCol) = ParseJoinCondition(onCondition);
+        }
+        else
+        {
+            // 2. Fallback: Identify Natural Keys (Priority 2)
+            var keys = IdentifyNaturalKeys(buildList.First(), rhs);
+            if (keys.HasValue) // CEK NULL HARUS DILAKUKAN
             {
-                // Bandingkan hanya nama kolom (abaikan nama tabel)
-                string lName = lKey.Contains('.') ? lKey.Split('.').Last() : lKey;
-                string rName = rKey.Contains('.') ? rKey.Split('.').Last() : rKey;
-
-                if (string.Equals(lName, rName, StringComparison.OrdinalIgnoreCase))
-                {
-                    joinPairs.Add((lKey, rKey));
-                }
+                leftKeyCol = keys.Value.Item1;
+                rightKeyCol = keys.Value.Item2;
             }
         }
 
-        if (joinPairs.Count == 0) yield break;
+        // Cek jika penentuan key gagal
+        if (string.IsNullOrEmpty(leftKeyCol) || string.IsNullOrEmpty(rightKeyCol)) yield break;
 
-        // 4. Build phase : buat Hash Table dari Kiri
+        // 3. BUILD PHASE
         var hashTable = new Dictionary<string, List<Row>>();
         foreach (var row in buildList)
         {
-            string key = GenerateKey(row, joinPairs.Select(p => p.lKey));
-            if (!hashTable.ContainsKey(key)) hashTable[key] = new List<Row>();
-            hashTable[key].Add(row);
+            string? keyVal = GetValueByColumnName(row, leftKeyCol!);
+            if (keyVal == null) continue;
+
+            if (!hashTable.ContainsKey(keyVal)) hashTable[keyVal] = new List<Row>();
+            hashTable[keyVal].Add(row);
         }
 
-        // 5. Probe phase : proses kanan (mulai dari yang sudah di intip)
-        do 
+        // 4. PROBE PHASE
+        foreach (var rightRow in rhs)
         {
-            var rightRow = rhsEnumerator.Current;
-            string key = GenerateKey(rightRow, joinPairs.Select(p => p.rKey));
-
-            if (hashTable.TryGetValue(key, out var matches))
+            string? keyVal = GetValueByColumnName(rightRow, rightKeyCol!);
+            
+            if (keyVal != null && hashTable.TryGetValue(keyVal, out var matches))
             {
-                foreach (var leftRow in matches)
-                {
-                    yield return MergeRows(leftRow, rightRow);
-                }
+                foreach (var leftRow in matches) yield return MergeRows(leftRow, rightRow);
             }
-        } while (rhsEnumerator.MoveNext());
+        }
     }
 
-    // Helper Ringkas
-    private string GenerateKey(Row row, IEnumerable<string> cols)
+    // Helper Methods
+
+    private (string?, string?) ParseJoinCondition(string? condition)
     {
-        return string.Join("|", cols.Select(c => row.Columns.ContainsKey(c) ? row.Columns[c]?.ToString() : "NULL"));
+        if (string.IsNullOrEmpty(condition)) return (null, null);
+        var parts = condition.Split('=').Select(p => p.Trim()).ToArray();
+        return (parts.Length == 2) ? (parts[0], parts[1]) : (null, null);
+    }
+    
+    private (string, string)? IdentifyNaturalKeys(Row leftSample, IEnumerable<Row> rhsEnumerable)
+    {
+        var rhsEnum = rhsEnumerable.GetEnumerator();
+        if (!rhsEnum.MoveNext()) return null;
+        var rightSample = rhsEnum.Current;
+
+        foreach (var lKey in leftSample.Columns.Keys)
+        {
+            foreach (var rKey in rightSample.Columns.Keys)
+            {
+                string lName = lKey.Split('.').Last();
+                string rName = rKey.Split('.').Last();
+                if (string.Equals(lName, rName, StringComparison.OrdinalIgnoreCase)) return (lKey, rKey);
+            }
+        }
+        return null;
+    }
+
+    private string? GetValueByColumnName(Row row, string colName)
+    {
+        if (row.Columns.ContainsKey(colName)) return row.Columns[colName]?.ToString();
+        var match = row.Columns.Keys.FirstOrDefault(k => k.EndsWith($".{colName}") || colName.EndsWith($".{k}"));
+        return (match != null) ? row.Columns[match]?.ToString() : null;
     }
 
     private Row MergeRows(Row left, Row right)
     {
         var newRow = new Row();
         foreach (var c in left.Columns) newRow.Columns[c.Key] = c.Value;
-        foreach (var c in right.Columns) newRow.Columns[c.Key] = c.Value; // Timpa jika duplikat
+        foreach (var c in right.Columns) { if (!newRow.Columns.ContainsKey(c.Key)) newRow.Columns[c.Key] = c.Value; }
         return newRow;
     }
 
     private IEnumerable<Row> FetchRows(string table)
     {
-        // Baca dari disk & Normalisasi "Kolom" jadi "Tabel.Kolom"
         var rows = storageManager.ReadBlock(new DataRetrieval(table, new[] { "*" }));
         if (rows == null) yield break;
 
         foreach (var r in rows)
         {
-            var normRow = new Row();
+            var norm = new Row();
             foreach (var c in r.Columns)
             {
                 string key = c.Key.Contains('.') ? c.Key : $"{table}.{c.Key}";
-                normRow.Columns[key] = c.Value;
+                norm.Columns[key] = c.Value;
             }
-            yield return normRow;
+            yield return norm;
         }
     }
 }
