@@ -1,0 +1,42 @@
+using mDBMS.Common.Interfaces;
+using mDBMS.Common.Transaction;
+
+namespace mDBMS.QueryProcessor.Transaction
+{
+    internal class CommitTransactionHandler : IQueryHandler
+    {
+        private readonly QueryProcessor _processor;
+        private readonly IConcurrencyControlManager _concurrencyControlManager;
+
+        public CommitTransactionHandler(QueryProcessor processor, IConcurrencyControlManager concurrencyControlManager)
+        {
+            _processor = processor;
+            _concurrencyControlManager = concurrencyControlManager;
+        }
+
+        public ExecutionResult HandleQuery(string query)
+        {
+            if (!_processor.ActiveTransactionId.HasValue)
+            {
+                return new ExecutionResult()
+                {
+                    Query = query,
+                    Success = false,
+                    Message = "Tidak ada transaksi aktif yang bisa di-COMMIT.",
+                    TransactionId = null
+                };
+            }
+
+            var transactionId = _processor.ActiveTransactionId.Value;
+            _concurrencyControlManager.EndTransaction(transactionId, true);
+            _processor.ActiveTransactionId = null;
+            return new ExecutionResult()
+            {
+                Query = query,
+                Success = true,
+                Message = $"Transaksi {transactionId} berhasil di-COMMIT.",
+                TransactionId = transactionId
+            };
+        }
+    }
+}
