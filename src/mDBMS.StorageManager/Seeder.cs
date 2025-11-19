@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using mDBMS.Common.Data;
 
 namespace mDBMS.StorageManager
@@ -11,7 +12,7 @@ namespace mDBMS.StorageManager
             SeedStudents();
             SeedCourses();
             SeedEnrollments();
-            Console.WriteLine("Seeder selesai! Semua file .dat sudah dibuat dengan data dummy.");
+            Console.WriteLine("Seeder selesai! Data dummy berhasil digenerate.");
         }
 
         private static void SeedStudents()
@@ -26,9 +27,10 @@ namespace mDBMS.StorageManager
                 }
             };
 
-            string filePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "students.dat");
+            // Absolute path di folder bin/debug
+            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "students.dat");
             
-            //SchemaSerializer.WriteSchema(filePath, schema); 
+            SchemaSerializer.WriteSchema(filePath, schema); 
 
             List<byte[]> rows = new();
             for (int i = 1; i <= 50; i++)
@@ -36,12 +38,10 @@ namespace mDBMS.StorageManager
                 var row = new Row(); 
                 row["StudentID"] = i;
                 row["FullName"] = $"Student {i}";
-                
                 rows.Add(RowSerializer.SerializeRow(schema, row));
             }
-
             WriteRowsToBlocks(filePath, rows);
-            Console.WriteLine($"Tabel Students: 50 baris berhasil ditulis ke {filePath}");
+            Console.WriteLine($"Tabel Students: 50 baris -> {filePath}");
         }
 
         private static void SeedCourses()
@@ -56,26 +56,20 @@ namespace mDBMS.StorageManager
                     new() { Name = "Credits", Type = DataType.Int, Length = 4 }
                 }
             };
-
-            string filePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "courses.dat");
-            //SchemaSerializer.WriteSchema(filePath, schema);
+            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "courses.dat");
+            SchemaSerializer.WriteSchema(filePath, schema);
 
             List<byte[]> rows = new();
-            string[] courseNames = { "Mathematics", "Physics", "Chemistry", "Biology", "History", 
-                                    "Geography", "English", "Programming", "Database", "Networks" };
-            
+            string[] courseNames = { "Math", "Physics", "Chemistry", "Bio", "History" };
             for (int i = 1; i <= 50; i++)
             {
                 var row = new Row();
                 row["CourseID"] = i;
-                row["CourseName"] = $"{courseNames[i % courseNames.Length]} {((i-1) / courseNames.Length) + 1}";
-                row["Credits"] = (i % 4) + 2;
-                
+                row["CourseName"] = $"{courseNames[i % 5]} {i}";
+                row["Credits"] = 3;
                 rows.Add(RowSerializer.SerializeRow(schema, row));
             }
-
             WriteRowsToBlocks(filePath, rows);
-            Console.WriteLine($"Tabel Courses: 50 baris berhasil ditulis ke {filePath}");
         }
 
         private static void SeedEnrollments()
@@ -91,58 +85,37 @@ namespace mDBMS.StorageManager
                     new() { Name = "Grade", Type = DataType.String, Length = 2 }
                 }
             };
-
-            string filePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "enrollments.dat");
-            //SchemaSerializer.WriteSchema(filePath, schema);
+            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "enrollments.dat");
+            SchemaSerializer.WriteSchema(filePath, schema);
 
             List<byte[]> rows = new();
-            string[] grades = { "A", "A-", "B+", "B", "B-", "C+", "C" };
-            
             for (int i = 1; i <= 50; i++)
             {
                 var row = new Row();
                 row["EnrollmentID"] = i;
-                row["StudentID"] = ((i - 1) % 50) + 1;
-                row["CourseID"] = ((i - 1) % 50) + 1;
-                row["Grade"] = grades[i % grades.Length];
-
+                row["StudentID"] = i;
+                row["CourseID"] = i;
+                row["Grade"] = "A";
                 rows.Add(RowSerializer.SerializeRow(schema, row));
             }
-
             WriteRowsToBlocks(filePath, rows);
-            Console.WriteLine($"Tabel Enrollments: 50 baris berhasil ditulis ke {filePath}");
         }
 
-       private static void WriteRowsToBlocks(string filePath, List<byte[]> rows)
+        private static void WriteRowsToBlocks(string filePath, List<byte[]> rows)
         {
-            // --- TULIS HEADER DUMMY JIKA FILE BARU ---
-            // StorageEngine mengharapkan 4KB pertama adalah Metadata.
-            // Karena SchemaSerializer belum aktif, isi 0 saja.
-            if (!System.IO.File.Exists(filePath))
-            {
-                using (var fs = new System.IO.FileStream(filePath, System.IO.FileMode.Create, System.IO.FileAccess.Write))
-                {
-                    byte[] emptyHeader = new byte[4096]; // 4KB Header Kosong
-                    fs.Write(emptyHeader, 0, emptyHeader.Length);
-                }
-            }
-            // ----------------------------------------------------
-
+            // Append Only karena Header sudah dibuat
             List<byte[]> currentBlock = new();
-            int currentSize = 4; // Header (Count + DirOffset)
+            int currentSize = 4; 
 
             foreach (var rowBytes in rows)
             {
-                // +2 byte untuk pointer slot directory per record
                 if (currentSize + rowBytes.Length + 2 > BlockSerializer.BlockSize)
                 {
                     var block = BlockSerializer.CreateBlock(currentBlock);
                     BlockSerializer.AppendBlockToFile(filePath, block);
-
                     currentBlock.Clear();
                     currentSize = 4;
                 }
-
                 currentBlock.Add(rowBytes);
                 currentSize += rowBytes.Length + 2;
             }
