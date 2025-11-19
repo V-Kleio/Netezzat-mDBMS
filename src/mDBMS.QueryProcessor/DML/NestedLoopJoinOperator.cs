@@ -32,20 +32,7 @@ class NestedLoopJoinOperator : Operator
                 rhs = FetchRows(queryPlanStep.Table, []);
             }
 
-            // TODO: Once available, use the join parameters given by the query plan step
-            Row leftSample = lhs.FirstOrDefault(new Row());
-            Row rightSample = rhs.FirstOrDefault(new Row());
-
-            foreach (string leftAttribute in leftSample.Columns.Keys)
-            {
-                foreach (string rightAttribute in rightSample.Columns.Keys)
-                {
-                    if (leftAttribute.Split('.').Last() == rightAttribute.Split('.').Last())
-                    {
-                        joinColumns.Add((leftAttribute, rightAttribute));
-                    }
-                }
-            }
+            setJoinColumns((string) queryPlanStep.Parameters["on"]!);
         }
 
         foreach (Row leftRow in lhs)
@@ -78,6 +65,44 @@ class NestedLoopJoinOperator : Operator
                     }
                     
                     yield return joinedRow;
+                }
+            }
+        }
+    }
+
+    private void setJoinColumns(string onString)
+    {
+        if (onString.Trim() != "")
+        {
+            List<(string, string)> joinColumns = [];
+    
+            foreach (string operation in onString.Split(',').Select(s => s.Trim()))
+            {
+                var operands = operation.Split('=').Select(s => s.Trim()).ToArray();
+    
+                if (operands.Length != 2)
+                {
+                    throw new Exception("join on operands");
+                }
+    
+                joinColumns.Add((operands[0], operands[1]));
+            }
+    
+            this.joinColumns = joinColumns.ToHashSet();
+        }
+        else
+        {
+            Row leftSample = lhs!.FirstOrDefault(new Row());
+            Row rightSample = rhs!.FirstOrDefault(new Row());
+
+            foreach (string leftAttribute in leftSample.Columns.Keys)
+            {
+                foreach (string rightAttribute in rightSample.Columns.Keys)
+                {
+                    if (leftAttribute.Split('.').Last() == rightAttribute.Split('.').Last())
+                    {
+                        joinColumns.Add((leftAttribute, rightAttribute));
+                    }
                 }
             }
         }
