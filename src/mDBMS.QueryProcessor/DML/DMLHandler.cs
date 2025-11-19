@@ -18,7 +18,7 @@ namespace mDBMS.QueryProcessor.DML
 
         public ExecutionResult HandleQuery(string query)
         {
-            string upper = query.TrimStart().ToUpperInvariant();
+            string upper = query.Split()[0].Trim().ToUpperInvariant();
             return upper switch
             {
                 "SELECT" => HandleSelect(query),
