@@ -11,11 +11,15 @@ namespace mDBMS.QueryOptimizer
     public class QueryOptimizerEngine : IQueryOptimizer {
         private readonly IStorageManager _storageManager;
         private readonly CostEstimator _costEstimator;
+        private readonly QueryPlanCache _planCache;
+        private readonly QueryOptimizerOptions _options;
 
-        public QueryOptimizerEngine(IStorageManager storageManager)
+        public QueryOptimizerEngine(IStorageManager storageManager, QueryOptimizerOptions? options = null)
         {
             _storageManager = storageManager;
             _costEstimator = new CostEstimator(storageManager);
+            _options = options ?? QueryOptimizerOptions.Default;
+            _planCache = new QueryPlanCache(_options.PlanCacheCapacity, _options.PlanCacheTTL);
         }
 
         /// <summary>
@@ -38,6 +42,11 @@ namespace mDBMS.QueryOptimizer
         /// <param name="query">Query yang akan dioptimalkan</param>
         /// <returns>Optimized query execution plan</returns>
         public QueryPlan OptimizeQuery(Query query) {
+            var cacheKey = QuerySignatureBuilder.Build(query);
+            if (_options.EnablePlanCaching && _planCache.TryGet(cacheKey, out var cachedPlan))
+            {
+                return cachedPlan;
+            }
             // Step 1: Aplikasikan aturan ekuivalensi aljabar relasional (heuristik)
             var rewrittenQuery = QueryRewriter.ApplyHeuristicRules(query);
 
@@ -64,6 +73,11 @@ namespace mDBMS.QueryOptimizer
 
             // Step 5: Hitung cost akhir
             bestPlan.TotalEstimatedCost = GetCost(bestPlan);
+
+            if (_options.EnablePlanCaching)
+            {
+                _planCache.Set(cacheKey, bestPlan);
+            }
 
             return bestPlan;
         }
@@ -95,7 +109,6 @@ namespace mDBMS.QueryOptimizer
         /// <param name="query">Query yang akan dianalisis</param>
         /// <returns>Daftar alternatif query plan</returns>
         public IEnumerable<QueryPlan> GenerateAlternativePlans(Query query) {
-            // TODO: Generate beberapa alternatif rencana eksekusi
             var plans = new List<QueryPlan>();
 
             // Plan 1: Table Scan Strategy
@@ -109,6 +122,18 @@ namespace mDBMS.QueryOptimizer
 
             // Plan 3: Filter Pushdown Strategy
             plans.Add(GenerateFilterPushdownPlan(query));
+
+            // Plan 4: Join-aware Strategy
+            var joinPlan = GenerateJoinAwarePlan(query);
+            if (joinPlan != null) {
+                plans.Add(joinPlan);
+            }
+
+            // Plan 5: Order-aware Strategy
+            var orderPlan = GenerateOrderAwarePlan(query);
+            if (orderPlan != null) {
+                plans.Add(orderPlan);
+            }
 
             return plans;
         }
@@ -319,6 +344,203 @@ namespace mDBMS.QueryOptimizer
             return plan;
         }
 
+        /// <summary>
+        /// Generate plan yang memodelkan join execution steps.
+        /// </summary>
+        private QueryPlan? GenerateJoinAwarePlan(Query query)
+        {
+            if (query.Joins == null || !query.Joins.Any()) return null;
+
+            var plan = new QueryPlan
+            {
+                OriginalQuery = query,
+                Strategy = OptimizerStrategy.COST_BASED
+            };
+
+            int order = 1;
+
+            plan.Steps.Add(new QueryPlanStep
+            {
+                Order = order++,
+                Operation = OperationType.TABLE_SCAN,
+                Description = $"Scan base table {query.Table}",
+                Table = query.Table,
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["table"] = query.Table
+                }
+            });
+
+            foreach (var join in query.Joins)
+            {
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = order++,
+                    Operation = OperationType.NESTED_LOOP_JOIN,
+                    Description = $"Join {join.LeftTable} with {join.RightTable} ON {join.OnCondition}",
+                    Table = join.RightTable,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["leftTable"] = join.LeftTable,
+                        ["rightTable"] = join.RightTable,
+                        ["on"] = join.OnCondition
+                    }
+                });
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.WhereClause))
+            {
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = order++,
+                    Operation = OperationType.FILTER,
+                    Description = $"Apply filter: {query.WhereClause}",
+                    Table = query.Table,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["predicate"] = query.WhereClause
+                    }
+                });
+            }
+
+            AppendFinalizationSteps(query, plan, ref order);
+
+            return plan;
+        }
+
+        /// <summary>
+        /// Generate plan spesifik untuk ORDER BY sehingga optimizer bisa memilih index atau sort.
+        /// </summary>
+        private QueryPlan? GenerateOrderAwarePlan(Query query)
+        {
+            if (query.OrderBy == null || !query.OrderBy.Any()) return null;
+            if (string.IsNullOrWhiteSpace(query.Table)) return null;
+
+            var plan = new QueryPlan
+            {
+                OriginalQuery = query,
+                Strategy = OptimizerStrategy.HEURISTIC
+            };
+
+            int order = 1;
+            bool canUseIndex = false;
+
+            try
+            {
+                var stats = _storageManager.GetStats(query.Table);
+                var indexedColumns = stats.Indices.Select(i => StripTableAlias(i.Item1)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                canUseIndex = query.OrderBy.All(o => indexedColumns.Contains(StripTableAlias(o.Column)));
+            }
+            catch
+            {
+                canUseIndex = false;
+            }
+
+            plan.Steps.Add(new QueryPlanStep
+            {
+                Order = order++,
+                Operation = canUseIndex ? OperationType.INDEX_SCAN : OperationType.TABLE_SCAN,
+                Description = canUseIndex
+                    ? $"Index scan on {query.Table} using ORDER BY"
+                    : $"Table scan on {query.Table} before sort",
+                Table = query.Table,
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["table"] = query.Table
+                }
+            });
+
+            if (!string.IsNullOrWhiteSpace(query.WhereClause))
+            {
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = order++,
+                    Operation = OperationType.FILTER,
+                    Description = $"Apply filter: {query.WhereClause}",
+                    Table = query.Table,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["predicate"] = QualifyPredicate(query.WhereClause!, query.Table)
+                    }
+                });
+            }
+
+            if (!canUseIndex)
+            {
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = order++,
+                    Operation = OperationType.SORT,
+                    Description = $"Sort by: {string.Join(", ", query.OrderBy.Select(o => o.Column + (o.IsAscending ? " ASC" : " DESC")))}",
+                    Table = query.Table,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["orderBy"] = query.OrderBy.Select(o => new Dictionary<string, object?>
+                        {
+                            ["column"] = QualifyColumn(o.Column, query.Table),
+                            ["ascending"] = o.IsAscending
+                        }).ToList()
+                    }
+                });
+            }
+
+            AppendFinalizationSteps(query, plan, ref order, includeOrderByStep: false);
+
+            return plan;
+        }
+
+        private void AppendFinalizationSteps(Query query, QueryPlan plan, ref int nextOrder, bool includeOrderByStep = true)
+        {
+            if (query.SelectedColumns.Any())
+            {
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = nextOrder++,
+                    Operation = OperationType.PROJECTION,
+                    Description = $"Project columns: {string.Join(", ", query.SelectedColumns)}",
+                    Table = query.Table,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["columns"] = QualifyColumns(query.SelectedColumns, query.Table).ToList()
+                    }
+                });
+            }
+
+            if (query.GroupBy != null && query.GroupBy.Any())
+            {
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = nextOrder++,
+                    Operation = OperationType.AGGREGATION,
+                    Description = $"Group by: {string.Join(", ", query.GroupBy)}",
+                    Table = query.Table,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["groupBy"] = QualifyColumns(query.GroupBy, query.Table).ToList()
+                    }
+                });
+            }
+
+            if (includeOrderByStep && query.OrderBy != null && query.OrderBy.Any())
+            {
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = nextOrder++,
+                    Operation = OperationType.SORT,
+                    Description = $"Sort by: {string.Join(", ", query.OrderBy.Select(o => o.Column + (o.IsAscending ? " ASC" : " DESC")))}",
+                    Table = query.Table,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["orderBy"] = query.OrderBy.Select(o => new Dictionary<string, object?>
+                        {
+                            ["column"] = QualifyColumn(o.Column, query.Table),
+                            ["ascending"] = o.IsAscending
+                        }).ToList()
+                    }
+                });
+            }
+        }
+
         #endregion
 
         #region Qualification Helpers
@@ -385,6 +607,22 @@ namespace mDBMS.QueryOptimizer
 
             return result;
         }
+        private static string StripTableAlias(string column)
+        {
+            if (string.IsNullOrWhiteSpace(column)) return string.Empty;
+            var partIdx = column.IndexOf('.');
+            return partIdx >= 0 ? column.Substring(partIdx + 1) : column;
+        }
         #endregion
+
+        public void ClearPlanCache()
+        {
+            _planCache.Clear();
+        }
+
+        public QueryOptimizerOptions GetOptions()
+        {
+            return _options;
+        }
     }
 }
