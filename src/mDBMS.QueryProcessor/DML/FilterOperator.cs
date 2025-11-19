@@ -5,62 +5,46 @@ namespace mDBMS.QueryProcessor.DML;
 
 class FilterOperator : Operator
 {
+    private Condition? _condition;
+
     public FilterOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
         : base(storageManager, queryPlanStep, localTableStorage)
     {
         // Inisialisasi state (Usahakan semua state dimuat dalam GetRows)
         this.usePreviousTable = true;
+
+        // Extract condition from parameters
+        if (queryPlanStep.Parameters.TryGetValue("Condition", out var ConditionObj) && ConditionObj is Condition condition)
+        {
+            _condition = condition;
+        }
+        else
+        {
+            // Parse from description jika tidak ada di parameters
+            _condition = ParseConditionFromDescription(queryPlanStep.Description);
+        }
     }
 
     public override IEnumerable<Row> GetRows()
     {
         var input = localTableStorage.lastResult;
-        if (input == null)
+        if (input == null || _condition == null)
         {
             yield break;
         }
-
-        // Parse Filter Expression
-        string expr = queryPlanStep.Description.Replace("Filter:", "").Trim();
-
-        if (string.IsNullOrWhiteSpace(expr))
-        {
-            yield break;
-        }
-
-        // Parse Operator
-        string[] ops = new[] {">=", "<=", "<>", "!=", "=", ">", "<"};
-        string usedOp = ops.FirstOrDefault(op => expr.Contains(op)) ?? throw new Exception("Operator filter tidak ditemukan.");
-
-        var parts = expr.Split(usedOp, 2);
-        string lhs = parts[0].Trim();
-        string rhsRaw = parts[1].Trim();
-
-        string rhs = rhsRaw.Trim('\'', '"');
 
         // Search lhs column
-        string? lhsColumn = FindMatchingColumn(input, lhs);
+        string? lhsColumn = FindMatchingColumn(input, _condition.lhs);
         if (lhsColumn == null)
         {
             yield break;
         }
 
-        bool rhsIsColumn =
-            !double.TryParse(rhs, out _) &&
-            !rhsRaw.StartsWith("'") &&
-            !rhsRaw.StartsWith("\"") &&
-            rhsRaw.All(c => char.IsLetterOrDigit(c) || c == '_' || c == '.');
+        // Determine if rhs is column or literal value
+        string? rhsColumn = FindMatchingColumn(input, _condition.rhs);
+        bool rhsIsColumn = rhsColumn != null;
 
-        string? rhsColumn = null;
-        if (rhsIsColumn)
-        {
-            rhsColumn = FindMatchingColumn(input, rhs);
-            if (rhsColumn == null)
-            {
-                yield break;
-            }
-        }
-
+        // Filter rows
         foreach (var row in input)
         {
             if (row == null)
@@ -70,9 +54,9 @@ class FilterOperator : Operator
 
             object lhsValue = row.Columns[lhsColumn];
 
-            object rhsValue = rhsIsColumn ? row.Columns[rhsColumn!] : (object)rhs;
+            object rhsValue = rhsIsColumn ? row.Columns[rhsColumn!] : (object)_condition.rhs;
 
-            if (RowPassesFilter(lhsValue, rhsValue, usedOp))
+            if (EvaluateCondition(lhsValue, rhsValue, _condition.opr))
             {
                 yield return row;
             }
@@ -95,9 +79,9 @@ class FilterOperator : Operator
             }
         }
         return null;
-    } 
+    }
 
-    private bool RowPassesFilter(object lhs, object rhs, string op)
+    private bool EvaluateCondition(object lhs, object rhs, Condition.Operation operation)
     {
         // Numeric comparison
         bool lhsIsNum = double.TryParse(lhs?.ToString(), out double lnum);
@@ -105,14 +89,14 @@ class FilterOperator : Operator
 
         if (lhsIsNum && rhsIsNum)
         {
-            return op switch
+            return operation switch
             {
-                "=" => lnum == rnum,
-                "!=" or "<>" => lnum != rnum,
-                ">" => lnum > rnum,
-                "<" => lnum < rnum,
-                ">=" => lnum >= rnum,
-                "<=" => lnum <= rnum,
+                Condition.Operation.EQ => lnum == rnum,
+                Condition.Operation.NEQ => lnum != rnum,
+                Condition.Operation.GT => lnum > rnum,
+                Condition.Operation.LT => lnum < rnum,
+                Condition.Operation.GEQ => lnum >= rnum,
+                Condition.Operation.LEQ => lnum <= rnum,
                 _ => false
             };
         }
@@ -122,12 +106,59 @@ class FilterOperator : Operator
             string ls = lhs?.ToString() ?? "";
             string rs = rhs?.ToString() ?? "";
 
-            return op switch
+            return operation switch
             {
-                "=" => ls.Equals(rs, StringComparison.OrdinalIgnoreCase),
-                "!=" or "<>" => !ls.Equals(rs, StringComparison.OrdinalIgnoreCase),
+                Condition.Operation.EQ => ls.Equals(rs, StringComparison.OrdinalIgnoreCase),
+                Condition.Operation.NEQ => !ls.Equals(rs, StringComparison.OrdinalIgnoreCase),
                 _ => false
             };
         }
+    }
+
+    private Condition? ParseConditionFromDescription(string description)
+    {
+        string expr = description.Replace("Filter:", "").Trim();
+        
+        if (string.IsNullOrWhiteSpace(expr))
+        {
+            return null;
+        }
+
+        // Parse operator
+        string[] ops = new[] {">=", "<=", "<>", "!=", "=", ">", "<"};
+        string? usedOp = ops.FirstOrDefault(op => expr.Contains(op));
+        
+        if (usedOp == null)
+        {
+            return null;
+        }
+
+        var parts = expr.Split(usedOp, 2);
+        if (parts.Length != 2)
+        {
+            return null;
+        }
+
+        string lhs = parts[0].Trim();
+        string rhsRaw = parts[1].Trim();
+        string rhs = rhsRaw.Trim('\'', '"');
+
+        var operation = usedOp switch
+        {
+            "=" => Condition.Operation.EQ,
+            "!=" or "<>" => Condition.Operation.NEQ,
+            ">" => Condition.Operation.GT,
+            "<" => Condition.Operation.LT,
+            ">=" => Condition.Operation.GEQ,
+            "<=" => Condition.Operation.LEQ,
+            _ => Condition.Operation.EQ
+        };
+
+        return new Condition
+        {
+            lhs = lhs,
+            rhs = rhs,
+            opr = operation
+        };
     }
 }
