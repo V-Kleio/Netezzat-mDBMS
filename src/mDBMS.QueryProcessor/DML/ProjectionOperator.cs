@@ -1,6 +1,7 @@
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
 using mDBMS.Common.Data;
+using System.Linq;
 
 namespace mDBMS.QueryProcessor.DML;
 
@@ -15,44 +16,33 @@ class ProjectionOperator : Operator
     public override IEnumerable<Row> GetRows()
     {
         var inputRows = localTableStorage.lastResult;
-        if (inputRows == null || !inputRows.Any())
-        {
-            yield break;
-        }
+        if (inputRows == null || !inputRows.Any()) yield break;
 
-        // 1. Parse kolom target dari deskripsi query plan step
-        var rawTargetColumns = ParseColumnsFromDescription(queryPlanStep.Description);
-        bool selectAll = rawTargetColumns.Contains("*");
+        List<string> targetColumns;
+        if (queryPlanStep.Parameters.TryGetValue("columns", out var colsObj) && colsObj is List<string> colsFromParam)
+            targetColumns = colsFromParam;
+        else
+            targetColumns = ParseColumnsFromDescription(queryPlanStep.Description);
 
-        // 2. Normalisasi nama kolom dengan menambahkan prefix tabel jika perlu
-        var targetColumns = new List<string>();
+        bool selectAll = targetColumns.Contains("*");
+        string currentTable = queryPlanStep.Table;
+
         if (!selectAll)
         {
-            string currentTable = queryPlanStep.Table; 
-            foreach (var col in rawTargetColumns)
+            for (int i = 0; i < targetColumns.Count; i++)
             {
-                if (!col.Contains('.') && !string.IsNullOrEmpty(currentTable))
-                {
-                    targetColumns.Add($"{currentTable}.{col}");
-                }
-                else
-                {
-                    targetColumns.Add(col);
-                }
+                if (!targetColumns[i].Contains('.') && !string.IsNullOrEmpty(currentTable))
+                    targetColumns[i] = $"{currentTable}.{targetColumns[i]}";
             }
         }
 
-        // 3. Proses Proyeksi
         foreach (var row in inputRows)
         {
             var projectedRow = new Row();
 
             if (selectAll)
             {
-                foreach (var col in row.Columns)
-                {
-                    projectedRow.Columns[col.Key] = col.Value;
-                }
+                foreach (var col in row.Columns) projectedRow.Columns[col.Key] = col.Value;
             }
             else
             {
@@ -64,15 +54,11 @@ class ProjectionOperator : Operator
                     }
                     else 
                     {
-                         var shortMatch = row.Columns.Keys.FirstOrDefault(k => k.EndsWith($".{colName}") || k == colName);
-                         if (shortMatch != null)
-                         {
-                             projectedRow.Columns[colName] = row.Columns[shortMatch];
-                         }
+                        var shortMatch = row.Columns.Keys.FirstOrDefault(k => k.EndsWith($".{colName}") || k == colName);
+                        if (shortMatch != null) projectedRow.Columns[colName] = row.Columns[shortMatch];
                     }
                 }
             }
-
             yield return projectedRow;
         }
     }
@@ -80,13 +66,10 @@ class ProjectionOperator : Operator
     private List<string> ParseColumnsFromDescription(string description)
     {
         string prefix = "Project columns: ";
-        
         if (!string.IsNullOrEmpty(description) && description.StartsWith(prefix))
         {
-            var columnsPart = description.Replace(prefix, "").Trim();
-            return columnsPart.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
+            return description.Replace(prefix, "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
         }
-
         return new List<string> { "*" };
     }
 }
