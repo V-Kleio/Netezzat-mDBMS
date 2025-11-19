@@ -62,9 +62,12 @@ namespace mDBMS.QueryProcessor.DML
 
                 IEnumerable<Row> result = op.GetRows();
 
+                LocalTableStorage oldStorage = storage;
+                storage = new LocalTableStorage();
+
                 if (!op.usePreviousTable)
                 {
-                    storage.holdStorage = storage.lastResult;
+                    storage.holdStorage = oldStorage.lastResult;
                 }
 
                 storage.lastResult = result;
