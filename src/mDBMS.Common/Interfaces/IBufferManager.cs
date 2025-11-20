@@ -1,8 +1,9 @@
-namespace mDBMS.Common.Interfaces
+namespace mDBMS.Common.Interfaces;
+
+using mDBMS.Common.Data;
+
+public interface IBufferManager
 {
-	public interface IBufferManager
-	{
-		void WriteToBuffer(byte[] data);
-		byte[] ReadFromBuffer(int blockId);
-	}
+    void WriteToBuffer(Page page);
+    byte[] ReadFromBuffer(string tableName, int blockId);
 }

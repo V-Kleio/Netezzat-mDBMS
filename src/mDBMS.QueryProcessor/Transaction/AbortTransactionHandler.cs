@@ -22,7 +22,8 @@ namespace mDBMS.QueryProcessor.Transaction
                 {
                     Query = query,
                     Success = false,
-                    Message = "Tidak ada transaksi aktif yang bisa di-ABORT."
+                    Message = "Tidak ada transaksi aktif yang bisa di-ABORT.",
+                    TransactionId = null
                 };
             }
 
@@ -33,7 +34,8 @@ namespace mDBMS.QueryProcessor.Transaction
             {
                 Query = query,
                 Success = true,
-                Message = $"Transaksi {transactionId} telah di-ABORT."
+                Message = $"Transaksi {transactionId} telah di-ABORT.",
+                TransactionId = transactionId
             };
         }
     }

@@ -1,6 +1,9 @@
 using mDBMS.Common.Transaction;
+using mDBMS.Common.Interfaces;
+using mDBMS.Common.Data;
 
 namespace mDBMS.Common.Interfaces
+
 {
     public interface IFailureRecoveryManager
 	{
@@ -11,5 +14,6 @@ namespace mDBMS.Common.Interfaces
 
 		//RecoverCriteria udah ada di mDBMS.Common/DTOs
         void Recover(RecoverCriteria criteria);
+
     }
 }
