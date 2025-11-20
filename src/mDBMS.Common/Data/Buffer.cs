@@ -1,89 +1,89 @@
 using System;
 using System.Collections.Generic;
 
-namespace mDBMS.Common.Data;
+namespace mDBMS.Common.Data
 {
     // Buffer Key
     public readonly struct BufferKey : IEquatable<BufferKey>
-{
-    public string TableName { get; }
-    public int BlockID { get; }
-
-    public BufferKey(string tableName, int blockId)
     {
-        TableName = tableName;
-        BlockID = blockId;
-    }
+        public string TableName { get; }
+        public int BlockID { get; }
 
-    public bool Equals(BufferKey other)
-    {
-        return TableName == other.TableName && BlockID == other.BlockID;
-    }
-
-    public override int GetHashCode()
-    {
-        return HashCode.Combine(TableName, BlockID);
-    }
-}
-
-// Buffer pool
-public class BufferPool
-{
-    private const int MaxBufferSize = 100;
-
-    private readonly Dictionary<BufferKey, Page> _frames;
-    private readonly List<BufferKey> _evictionQueue;
-
-    public BufferPool()
-    {
-        _frames = new Dictionary<BufferKey, Page>();
-        _evictionQueue = new List<BufferKey>();
-    }
-
-    public Page? GetPage(string tableName, int blockId)
-    {
-        var key = new BufferKey(tableName, blockId);
-
-        if (_frames.TryGetValue(key, out var page))
+        public BufferKey(string tableName, int blockId)
         {
-            // LRU Logic (posisi lama ke pling blakang)
-            _evictionQueue.Remove(key);
-            _evictionQueue.Add(key);
-            return page;
+            TableName = tableName;
+            BlockID = blockId;
         }
-        return null;
+
+        public bool Equals(BufferKey other)
+        {
+            return TableName == other.TableName && BlockID == other.BlockID;
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(TableName, BlockID);
+        }
     }
 
-    public Page? AddOrUpdatePage(Page page)
+    // Buffer pool
+    public class BufferPool
     {
-        var key = new BufferKey(page.TableName, page.BlockID);
+        private const int MaxBufferSize = 100;
 
-        if (_frames.ContainsKey(key))
+        private readonly Dictionary<BufferKey, Page> _frames;
+        private readonly List<BufferKey> _evictionQueue;
+
+        public BufferPool()
         {
-            _frames[key] = page;
+            _frames = new Dictionary<BufferKey, Page>();
+            _evictionQueue = new List<BufferKey>();
+        }
+
+        public Page? GetPage(string tableName, int blockId)
+        {
+            var key = new BufferKey(tableName, blockId);
+
+            if (_frames.TryGetValue(key, out var page))
+            {
+                // LRU Logic (posisi lama ke pling blakang)
+                _evictionQueue.Remove(key);
+                _evictionQueue.Add(key);
+                return page;
+            }
             return null;
         }
 
-        Page? evictedPage = null;
-
-        if (_frames.Count >= MaxBufferSize)
+        public Page? AddOrUpdatePage(Page page)
         {
-            var victimKey = _evictionQueue[0];
-            evictedPage = _frames[victimKey];
+            var key = new BufferKey(page.TableName, page.BlockID);
 
-            _frames.Remove(victimKey);
-            _evictionQueue.RemoveAt(0);
+            if (_frames.ContainsKey(key))
+            {
+                _frames[key] = page;
+                return null;
+            }
+
+            Page? evictedPage = null;
+
+            if (_frames.Count >= MaxBufferSize)
+            {
+                var victimKey = _evictionQueue[0];
+                evictedPage = _frames[victimKey];
+
+                _frames.Remove(victimKey);
+                _evictionQueue.RemoveAt(0);
+            }
+
+            _frames.Add(key, page);
+            _evictionQueue.Add(key);
+
+            return evictedPage;
         }
 
-        _frames.Add(key, page);
-        _evictionQueue.Add(key);
-
-        return evictedPage;
+        public IEnumerable<Page> GetAllPages()
+        {
+            return _frames.Values;
+        }
     }
-
-    public IEnumerable<Page> GetAllPages()
-    {
-        return _frames.Values;
-    }
-}
 }
