@@ -4,11 +4,6 @@ namespace mDBMS.StorageManager
     {
         Int,
         String,
-        //Varchar = String, // alias, gatau dah ntar Varchar ato String
-        // ntar tambahin lagi 
+        Float
     }
-
 }
-
-
-    

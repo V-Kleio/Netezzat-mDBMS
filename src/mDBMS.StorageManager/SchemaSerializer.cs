@@ -1,85 +1,110 @@
-using System.Text ; 
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
 
 namespace mDBMS.StorageManager
 {
-    public class SchemaSerializer
+    public static class SchemaSerializer
     {
-        public static void WriteSchema(string path, TableSchema schema)
-        {
-            using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
-            using var bw = new BinaryWriter(fs, Encoding.UTF8);
+        private const string MagicNumber = "mDBM";
+        private const int Version = 1;
+        public const int HeaderSize = 4096; // Fixed 4KB
 
-            // magic number
-            bw.Write(Encoding.ASCII.GetBytes("mDBM"));
-            bw.Write(1);
-            // nama tabel
-            WriteFixedString(bw, schema.TableName, 20);
-            // jumlah kolom
-            bw.Write(schema.Columns.Count);
-            // definisi kolom
-            foreach (var col in schema.Columns)
-            {
-                WriteFixedString(bw, col.Name, 20);
-                bw.Write((byte)col.Type);
-                bw.Write(col.Length);
-            }
-        }
-
-        private static void WriteFixedString(BinaryWriter bw, string value, int length)
+        // Helper untuk menulis string dengan padding ASCII
+        private static void WriteFixedString(BinaryWriter writer, string value, int length)
         {
             var bytes = Encoding.ASCII.GetBytes(value);
-            Array.Resize(ref bytes, length);
-            bw.Write(bytes);
+            Array.Resize(ref bytes, length); // Padding dengan null/0
+            writer.Write(bytes);
         }
 
-        public static TableSchema ReadSchema(string path)
+        // Helper untuk membaca string dan menghilangkan padding null
+        private static string ReadFixedString(BinaryReader reader, int length)
         {
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read);
-            using var br = new BinaryReader(fs, Encoding.UTF8);
-
-            // format header kek gini
-            // Byte 0-3:   Magic Number "mDBM"
-            // Byte 4-7:   Version (int32)
-            // Byte 8-27:  Nama Tabel (20 byte fixed)
-            // Byte 28-31: Jumlah Kolom (int32)
-            // Untuk setiap kolom:
-            //   - 20 byte: Nama Kolom
-            //   - 1 byte:   Tipe Data
-            //   - 4 byte:  Panjang
-            
-
-            var magic = Encoding.ASCII.GetString(br.ReadBytes(4));
-            if (magic != "mDBM")
-                throw new Exception("Invalid file format.");
-
-            int version = br.ReadInt32();
-            string tableName = ReadFixedString(br, 20);
-            int columnCount = br.ReadInt32();
-
-            var columns = new List<ColumnSchema>();
-            for (int i = 0; i < columnCount; i++)
-            {
-                string colName = ReadFixedString(br, 20);
-                var type = (DataType)br.ReadByte();
-                int length = br.ReadInt32();
-
-                columns.Add(new ColumnSchema
-                {
-                    Name = colName,
-                    Type = type,
-                    Length = length
-                });
-            }
-
-            return new TableSchema { TableName = tableName, Columns = columns };
-        }
-
-        private static string ReadFixedString(BinaryReader br, int length)
-        {
-            var bytes = br.ReadBytes(length);
+            var bytes = reader.ReadBytes(length);
             return Encoding.ASCII.GetString(bytes).TrimEnd('\0');
         }
 
+        public static void WriteSchema(string filePath, TableSchema schema)
+        {
+            // Gunakan MemoryStream untuk membuat header 4KB penuh di memori
+            byte[] headerBytes = new byte[HeaderSize];
+
+            using (var stream = new MemoryStream(headerBytes))
+            using (var writer = new BinaryWriter(stream))
+            {
+                // 1. Magic Number (4 bytes)
+                writer.Write(Encoding.ASCII.GetBytes(MagicNumber));
+                
+                // 2. Version (4 bytes)
+                writer.Write(Version);
+
+                // 3. Table Name (32 bytes - Fixed Length padding)
+                WriteFixedString(writer, schema.TableName, 32);
+
+                // 4. Column Count (4 bytes)
+                writer.Write(schema.Columns.Count);
+
+                // 5. Column Definitions
+                foreach (var col in schema.Columns)
+                {
+                    // Col Name (32 bytes)
+                    WriteFixedString(writer, col.Name, 32);
+
+                    // DataType (1 byte)
+                    writer.Write((byte)col.Type);
+
+                    // Length (4 bytes)
+                    writer.Write(col.Length);
+                }
+            }
+            // Tulis buffer 4KB penuh ke awal file
+            using (var fs = new FileStream(filePath, FileMode.OpenOrCreate, FileAccess.Write))
+            {
+                fs.Seek(0, SeekOrigin.Begin);
+                fs.Write(headerBytes, 0, HeaderSize);
+            }
+        }
+
+        public static TableSchema ReadSchema(string filePath)
+        {
+            using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+            {
+                if (fs.Length < HeaderSize) throw new Exception("File corrupted or too small.");
+
+                byte[] headerBytes = new byte[HeaderSize];
+                fs.Read(headerBytes, 0, HeaderSize);
+
+                using (var stream = new MemoryStream(headerBytes))
+                using (var reader = new BinaryReader(stream))
+                {
+                    // 1. Validasi Magic Number
+                    string magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
+                    if (magic != MagicNumber) throw new Exception("Invalid file format (Magic Number mismatch).");
+
+                    reader.ReadInt32(); // Skip Version
+                    
+                    // 2. Table Name (32 bytes)
+                    string tableName = ReadFixedString(reader, 32);
+
+                    // 3. Column Count
+                    int colCount = reader.ReadInt32();
+
+                    var schema = new TableSchema { TableName = tableName };
+
+                    // 4. Read Columns
+                    for (int i = 0; i < colCount; i++)
+                    {
+                        string colName = ReadFixedString(reader, 32);
+                        DataType type = (DataType)reader.ReadByte();
+                        int len = reader.ReadInt32();
+
+                        schema.Columns.Add(new ColumnSchema { Name = colName, Type = type, Length = len });
+                    }
+                    return schema;
+                }
+            }
+        }
     }
-    
 }
