@@ -1,11 +1,19 @@
 ﻿using mDBMS.Common.Transaction;
 using mDBMS.Common.Interfaces;
 using System.Text;
+using mDBMS.Common.Data;
 
+
+// ini real
 namespace mDBMS.FailureRecovery
 {
     public class FailureRecoveryManager : IFailureRecoveryManager, IBufferManager
     {
+        private readonly BufferPool _bufferPool;
+
+        // DI later
+        // private readonly IStorageManager _storageManager;
+
         private readonly string _logFilePath;
         private readonly string _logDirectory;
         private long _currentLSN;
@@ -14,7 +22,9 @@ namespace mDBMS.FailureRecovery
 
         public FailureRecoveryManager()
         {
-            _buffer = new byte[8192]; // 8KB buffer untuk IBufferManager
+            _bufferPool = new BufferPool();
+            // _storageManager = storageManager;
+
             _logDirectory = Path.Combine(Directory.GetCurrentDirectory(), "logs");
             _logFilePath = Path.Combine(_logDirectory, "mDBMS.log");
             _currentLSN = 0;
@@ -71,6 +81,7 @@ namespace mDBMS.FailureRecovery
             }
         }
 
+
         public void Recover(RecoverCriteria criteria)
         {
             Console.WriteLine($"[STUB FRM]: Recover dipanggil untuk TransactionId '{criteria.TransactionId}' pada Timestamp '{criteria.Timestamp}'");
@@ -81,16 +92,52 @@ namespace mDBMS.FailureRecovery
             Console.WriteLine("[STUB FRM]: SaveCheckpoint dipanggil");
         }
 
-        public void WriteToBuffer(byte[] data)
+        public byte[] ReadFromBuffer(string tableName, int blockId)
         {
-            Console.WriteLine($"[STUB FRM]: WriteToBuffer dipanggil, len={data?.Length ?? 0}");
+            Console.WriteLine($"[FRM-BUFFER]: ReadFromBuffer dipanggil, Table={tableName}, BlockId={blockId}");            
+            Page? page =_bufferPool.GetPage(tableName, blockId);
+
+            if (page != null)
+            {
+                return page.Data;
+            }
+
+            return Array.Empty<byte>();
         }
 
-        public byte[] ReadFromBuffer(int blockId)
+        public void WriteToBuffer(Page page)
         {
-            Console.WriteLine($"[STUB FRM-BUFFER]: ReadFromBuffer dipanggil, blockId={blockId}");
-            return new byte[0]; // TODO: implementasi buffer management
+            Console.WriteLine($"[FRM-BUFFER]: WriteToBuffer dipanggil, Table={page.TableName}, BlockId={page.BlockID}, IsDirty={page.IsDirty}");
+            
+            Page? evictedPage = _bufferPool.AddOrUpdatePage(page);
+
+            if (evictedPage != null) 
+            {
+                if (evictedPage.IsDirty) 
+                {
+                    Console.WriteLine($"[FRM-BUFFER]: Eviction - Flushing dirty page {evictedPage.BlockID} of {evictedPage.TableName}");
+                    FlushPage(evictedPage);
+                }
+            }
         }
+
+        private void FlushPage (Page page) 
+        {
+            // TODO: Di sini  memanggil IStorageManager (sm.WriteBlock)
+            // Namun, karena WriteBlock SM menerima DataWrite, perlu helper/wrapper
+            // untuk mengubah Page object menjadi raw bytes yang siap ditulis ke disk.
+            
+            Console.WriteLine($"[FRM-FLUSH]: Memulai I/O Tulis ke disk untuk {page.TableName}-{page.BlockID}");
+
+            // Implementasi stub sementara:
+            // if (_storageManager != null) {
+            //     _storageManager.WriteBlock(logic konversi Page ke DataWrite/byte[]);
+            // }
+
+            // Setelah sukses ditulis ke disk, halaman menjadi bersih lagi.
+            page.IsDirty = false;
+        }
+
 
         /// <summary>
         /// tentukan tipe operasi dari query string
