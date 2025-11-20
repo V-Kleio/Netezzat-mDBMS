@@ -5,14 +5,14 @@ using mDBMS.Common.Data;
 using mDBMS.Common.Interfaces;
 using mDBMS.StorageManager;
 
-class Program
+class StorageManagerDriver
 {
     static void Main(string[] args)
     {
         Console.WriteLine("=== FINAL TESTING STORAGE MANAGER (MILESTONE 2 COMPLETE) ===\n");
 
         // 1. Setup Storage Engine
-        IStorageManager storage = new StorageEngine(); 
+        IStorageManager storage = new StorageEngine();
         string pathRoot = AppDomain.CurrentDomain.BaseDirectory;
 
         // --- PHASE 0: CLEAN UP & SEED ---
@@ -20,7 +20,7 @@ class Program
         CleanUp(pathRoot, new[] { "students.dat", "courses.dat", "enrollments.dat" });
 
         Console.WriteLine(">>> Melakukan Seeding Data Ulang (50 rows per table)...");
-        Seeder.RunSeeder(); 
+        Seeder.RunSeeder();
         Console.WriteLine(">>> Seeding Selesai.\n");
 
         // ==========================================
@@ -29,7 +29,7 @@ class Program
         Console.WriteLine("--- TEST A: Membaca Data Seeder (Linear Scan) ---");
         var requestRead = new DataRetrieval("Students", new[] { "*" }, null);
         int count = 0;
-        
+
         foreach (var row in storage.ReadBlock(requestRead))
         {
             count++;
@@ -43,7 +43,7 @@ class Program
         Console.WriteLine($"Total data terbaca: {count} baris. (Expected: 50)");
         if (count == 50)
             Console.WriteLine("SUCCESS: Read Seeder berfungsi!\n");
-        else 
+        else
             Console.WriteLine("ERROR: Data Seeder tidak terbaca lengkap.\n");
 
 
@@ -52,13 +52,13 @@ class Program
         // ==========================================
         Console.WriteLine("--- TEST B: Menghitung Statistik (TASK 1.2) ---");
         var stats = storage.GetStats("Students");
-        
+
         Console.WriteLine($"[STATS] Table: {stats.Table}");
         Console.WriteLine($"[STATS] n_r (Total Rows): {stats.TupleCount}");
         Console.WriteLine($"[STATS] b_r (Total Blocks): {stats.BlockCount}");
         Console.WriteLine($"[STATS] l_r (Row Size): {stats.TupleSize} bytes");
         Console.WriteLine($"[STATS] f_r (Blocking Factor): {stats.BlockingFactor}");
-        
+
         if (stats.TupleCount == 50 && stats.BlockCount > 0)
             Console.WriteLine("SUCCESS: GetStats Valid.\n");
         else
@@ -82,12 +82,12 @@ class Program
         int affected = storage.WriteBlock(newStudent);
 
         long sizeAfter = File.Exists(studentsPath) ? new FileInfo(studentsPath).Length : 0;
-        
+
         Console.WriteLine($"[WRITE] Affected: {affected}, Size Delta: {sizeAfter - sizeBefore} bytes");
-        
+
         if (sizeAfter > sizeBefore)
             Console.WriteLine("SUCCESS: File bertambah besar (Write OK)!\n");
-        else 
+        else
             Console.WriteLine("ERROR: File tidak berubah.\n");
 
 
@@ -95,10 +95,10 @@ class Program
         // TEST D: CREATE INDEX (TASK 3.1 & 3.2)
         // ==========================================
         Console.WriteLine("--- TEST D: Membuat Hash Index (Indexing) ---");
-        
+
         // Kita buat Index di kolom StudentID
         storage.SetIndex("Students", "StudentID", IndexType.Hash);
-        
+
         // Verifikasi visual (cek console output "Membangun Index...")
         Console.WriteLine("SUCCESS: Perintah SetIndex dieksekusi (Cek log di atas).\n");
 
@@ -110,15 +110,15 @@ class Program
         Console.WriteLine("Mencari StudentID = 5 (Seharusnya melompat langsung ke blok terkait)");
 
         // Membuat Condition WHERE StudentID = 5
-        var condition = new Condition 
-        { 
-            lhs = "StudentID", 
-            opr = Condition.Operation.EQ, 
-            rhs = "5" 
+        var condition = new Condition
+        {
+            lhs = "StudentID",
+            opr = Condition.Operation.EQ,
+            rhs = "5"
         };
 
         var requestIndex = new DataRetrieval("Students", new[] { "*" }, condition);
-        
+
         bool found = false;
         foreach (var row in storage.ReadBlock(requestIndex))
         {
@@ -139,7 +139,7 @@ class Program
         foreach(var fileName in fileNames)
         {
             string path = Path.Combine(rootPath, fileName);
-            if(File.Exists(path)) File.Delete(path); 
+            if(File.Exists(path)) File.Delete(path);
         }
     }
 }
