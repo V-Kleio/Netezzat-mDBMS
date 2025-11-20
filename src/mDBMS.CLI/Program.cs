@@ -1,12 +1,14 @@
-﻿using mDBMS.CLI.Mocks;
-using mDBMS.QueryProcessor;
+﻿using mDBMS.QueryProcessor;
 using mDBMS.Common.Transaction;
 using mDBMS.QueryOptimizer;
+using mDBMS.StorageManager;
+using mDBMS.ConcurrencyControl;
+using mDBMS.FailureRecovery;
 
-var storageManager = new MockStorageManager();
+var storageManager = new StorageEngine();
 var optimizer = new QueryOptimizerEngine(storageManager);
-var concurrencyControl = new MockConcurrencyControlManager();
-var failureRecovery = new MockFailureRecovery();
+var concurrencyControl = new ConcurrencyControlManager();
+var failureRecovery = new FailureRecoveryManager();
 var queryProcessor = new QueryProcessor(storageManager, optimizer, concurrencyControl, failureRecovery);
 
 Console.WriteLine("mDBMS CLI siap digunakan. Ketik EXIT untuk keluar.");
