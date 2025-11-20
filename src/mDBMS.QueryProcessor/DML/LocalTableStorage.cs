@@ -3,11 +3,13 @@ namespace mDBMS.QueryProcessor.DML;
 
 class LocalTableStorage
 {
-    public Dictionary<string, IList<Row>> Tables { get; set; } = new();
+    /// <summary>
+    /// Penyimpanan hasil sementara operator yang belum digunakan
+    /// </summary>
+    public IEnumerable<Row> holdStorage = [];
 
-    public IList<Row> this[string key]
-    {
-        get => Tables[key];
-        set => Tables[key] = value;
-    }
+    /// <summary>
+    /// Penyimpanan hasil terakhir dari eksekusi operator
+    /// </summary>
+    public IEnumerable<Row> lastResult = [];
 }

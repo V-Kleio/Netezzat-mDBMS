@@ -22,7 +22,8 @@ namespace mDBMS.QueryProcessor.Transaction
                 {
                     Query = query,
                     Success = false,
-                    Message = $"Transaksi sudah aktif dengan ID {_processor.ActiveTransactionId.Value}."
+                    Message = $"Transaksi sudah aktif dengan ID {_processor.ActiveTransactionId.Value}.",
+                    TransactionId = _processor.ActiveTransactionId.Value
                 };
             }
 
@@ -31,7 +32,8 @@ namespace mDBMS.QueryProcessor.Transaction
             {
                 Query = query,
                 Success = true,
-                Message = $"Transaksi baru dimulai dengan ID {_processor.ActiveTransactionId.Value}."
+                Message = $"Transaksi baru dimulai dengan ID {_processor.ActiveTransactionId.Value}.",
+                TransactionId = _processor.ActiveTransactionId.Value
             };
         }
     }
