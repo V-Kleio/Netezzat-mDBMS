@@ -25,22 +25,22 @@ namespace mDBMS.QueryOptimizer
         /// Perkiraan cost untuk satu langkah eksekusi
         /// </summary>
         public double EstimateStepCost(QueryPlanStep step, Query query) {
-            // TODO: Mendapatkan statistik tabel dan indeks dari storage manager
-            // Untuk sekarang, menggunakan basic esimation berdasarkan tipe operasi
-
+            // Menggunakan statistik nyata dari StorageManager
+            // Aku rapihin dikit yogs :v
             try {
                 var stats = _storageManager.GetStats(step.Table);
+                var selectivity = EstimateSelectivity(query.WhereClause ?? string.Empty, stats);
 
                 return step.Operation switch {
-                    OperationType.TABLE_SCAN => EstimateTableScanCost(stats),
-                    OperationType.INDEX_SCAN => EstimateIndexScanCost(stats),
-                    OperationType.INDEX_SEEK => EstimateIndexSeekCost(stats),
-                    OperationType.FILTER => EstimateFilterCost(stats),
-                    OperationType.PROJECTION => EstimateProjectionCost(stats),
-                    OperationType.SORT => EstimateSortCost(stats),
+                    OperationType.TABLE_SCAN       => EstimateTableScanCost(stats),
+                    OperationType.INDEX_SCAN       => EstimateIndexScanCost(stats),
+                    OperationType.INDEX_SEEK       => EstimateIndexSeekCost(stats, selectivity),
+                    OperationType.FILTER           => EstimateFilterCost(stats),
+                    OperationType.PROJECTION       => EstimateProjectionCost(stats),
+                    OperationType.SORT             => EstimateSortCost(stats),
                     OperationType.NESTED_LOOP_JOIN => EstimateNestedLoopJoinCost(stats),
-                    OperationType.HASH_JOIN => EstimateHashJoinCost(stats),
-                    OperationType.MERGE_JOIN => EstimateMergeJoinCost(stats),
+                    OperationType.HASH_JOIN        => EstimateHashJoinCost(stats),
+                    OperationType.MERGE_JOIN       => EstimateMergeJoinCost(stats),
                     _ => 100.0 // Default cost
                 };
             } catch {
@@ -66,20 +66,27 @@ namespace mDBMS.QueryOptimizer
         /// </summary>
         private double EstimateIndexScanCost(Statistic stats) {
             // Index scan lebih efisien dari table scan
-            double indexCost = Math.Log2(stats.TupleCount) * INDEX_SEEK_COST;
-            double tupleRetrievalCost = stats.TupleCount * CPU_COST_PER_TUPLE * 0.5;
-            return indexCost + tupleRetrievalCost;
+            // Aku ubah dikit yogs :v (rhio)
+            int tuples = Math.Max(stats.TupleCount, 0);
+            int blocks = Math.Max(stats.BlockCount, 0);
+            double traversal = SafeLog2(Math.Max(tuples, 1)) * INDEX_SEEK_COST; // traversal B-Tree (SafeLog2 ada dibawah)
+            double ioCost = Math.Ceiling(blocks * 0.3) * IO_COST_PER_BLOCK;     // asumsi 30% blok dibaca
+            double cpuCost = tuples * CPU_COST_PER_TUPLE * 0.5;                 // sebagian tuple disentuh
+            return traversal + ioCost + cpuCost;
         }
 
         /// <summary>
-        /// Estimate cost untuk index seek (selective search)
+        /// Estimate cost untuk index seek (selective search) | 
+        /// Selectivity default = 10%
         /// </summary>
-        private double EstimateIndexSeekCost(Statistic stats) {
-            // Assume selectivity factor of 0.1 (10% of data retrieved)
-            double selectivity = 0.1;
-            double indexCost = Math.Log2(stats.TupleCount) * INDEX_SEEK_COST;
-            double tupleRetrievalCost = stats.TupleCount * selectivity * CPU_COST_PER_TUPLE;
-            return indexCost + tupleRetrievalCost;
+        private double EstimateIndexSeekCost(Statistic stats, double selectivity = 0.1) {
+            // Index seek: traversal + I/O page fetch + CPU untuk tuple yang terpilih
+            int tuples = Math.Max(stats.TupleCount, 0);
+            double indexTraversal = SafeLog2(Math.Max(tuples, 1)) * INDEX_SEEK_COST;
+            double expectedRows = tuples * Math.Clamp(selectivity, 0.0, 1.0);
+            double ioCost = Math.Ceiling(expectedRows / Math.Max(stats.BlockingFactor, 1.0)) * IO_COST_PER_BLOCK;
+            double cpuCost = expectedRows * CPU_COST_PER_TUPLE;
+            return indexTraversal + ioCost + cpuCost;
         }
 
         /// <summary>
@@ -102,9 +109,10 @@ namespace mDBMS.QueryOptimizer
         /// Complexity = O(n log n)
         /// </summary>
         private double EstimateSortCost(Statistic stats) {
-            if (stats.TupleCount == 0) return 0;
-
-            double sortComplexity = stats.TupleCount * Math.Log2(stats.TupleCount);
+            // Aku ubah dikit yogs :v log2(1) kan 0 ye...
+            if (stats.TupleCount <= 1) return 0;
+            double n = stats.TupleCount;
+            double sortComplexity = n * SafeLog2(n);
             return sortComplexity * CPU_COST_PER_TUPLE * SORT_COST_MULTIPLIER;
         }
 
@@ -115,7 +123,9 @@ namespace mDBMS.QueryOptimizer
         private double EstimateNestedLoopJoinCost(Statistic stats) {
             // TODO: Mendapatkan statistik dari kedua tabel yang dijoin
             // Untuk sekarang, memakai asumsi kuadrat dari tuple count
-            return stats.TupleCount * stats.TupleCount * CPU_COST_PER_TUPLE;
+            double n = Math.Max(stats.TupleCount, 0);
+            return n * n * CPU_COST_PER_TUPLE;
+            // return stats.TuplCount * stats.TupleCount * CPU_COST_PER_TUPLE;
         }
 
         /// <summary>
@@ -123,7 +133,9 @@ namespace mDBMS.QueryOptimizer
         /// Complexity = O(n + m)
         /// </summary>
         private double EstimateHashJoinCost(Statistic stats) {
-            return stats.TupleCount * CPU_COST_PER_TUPLE * 2;
+            double n = Math.Max(stats.TupleCount, 0);
+            return n * CPU_COST_PER_TUPLE * 2;
+            // return stats.TupleCount * CPU_COST_PER_TUPLE * 2;
         }
 
         /// <summary>
@@ -131,7 +143,9 @@ namespace mDBMS.QueryOptimizer
         /// Complexity = O(n + m) jika data sudah sorted
         /// </summary>
         private double EstimateMergeJoinCost(Statistic stats) {
-            return stats.TupleCount * CPU_COST_PER_TUPLE * 1.5;
+            double n = Math.Max(stats.TupleCount, 0);
+            return n * CPU_COST_PER_TUPLE * 1.5;
+            // return stats.TupleCount * CPU_COST_PER_TUPLE * 1.5;
         }
 
         #endregion
@@ -156,6 +170,15 @@ namespace mDBMS.QueryOptimizer
 
             // Default selectivity
             return 0.5;
+        }
+
+        /// <summary>
+        /// Safe log2 function supaya gak ada log(0)
+        /// </summary>
+        private static double SafeLog2(double x)
+        {
+            if (x <= 1.0) return 0.0;
+            return Math.Log2(x);
         }
     }
 }

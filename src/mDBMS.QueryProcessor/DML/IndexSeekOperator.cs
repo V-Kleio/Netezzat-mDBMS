@@ -1,22 +1,17 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using mDBMS.Common.Data;
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
 
 namespace mDBMS.QueryProcessor.DML;
 
-/// <summary>
-/// operator table scan dasar dengan dukungan kolom dan kondisi dari QueryPlanStep.
-/// </summary>
-class TableScanOperator : Operator
+// TODO: REPLACE STUB LOGIC WITH ACTUAL INDEX SEEKING SOLUTION
+class IndexSeekOperator : Operator
 {
     private readonly string _tableName;
     private readonly string[] _columns;
     private readonly Condition? _condition;
 
-    public TableScanOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
+    public IndexSeekOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
         : base(storageManager, queryPlanStep, localTableStorage)
     {
         usePreviousTable = false;
