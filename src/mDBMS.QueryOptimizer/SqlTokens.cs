@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace mDBMS.QueryOptimizer;
 
 /// <summary>
@@ -75,7 +73,7 @@ internal sealed class SqlLexer
 
         char c = _src[_pos];
 
-        // punctuation
+        // tanda baca
         switch (c)
         {
             case ',': _pos++; return new SqlToken(SqlTokenType.COMMA, ",");
@@ -100,7 +98,7 @@ internal sealed class SqlLexer
         if (char.IsDigit(c)) return ReadNumber();
         if (IsIdentStart(c)) return ReadIdentifierOrKeyword();
 
-        // Unknown char, skip
+        // Skip karakter tak dikenal
         _pos++;
         return NextToken();
     }
@@ -111,7 +109,7 @@ internal sealed class SqlLexer
         {
             var ch = _src[_pos];
             if (char.IsWhiteSpace(ch)) { _pos++; continue; }
-            // Skip line comments (starting with --)
+            // Skip komentar baris (dari string awal --)
             if (ch == '-' && _pos + 1 < _src.Length && _src[_pos + 1] == '-')
             {
                 _pos += 2;
@@ -129,7 +127,7 @@ internal sealed class SqlLexer
 
     private SqlToken ReadString()
     {
-        // assumes current char is '\''
+        // Asumsi: karakter current adalah backslash
         int start = ++_pos;
         while (!IsEof())
         {
@@ -141,7 +139,7 @@ internal sealed class SqlLexer
             }
             _pos++;
         }
-        // unterminated string – return what's left
+        // String yang tidak terminated, ambil sampai akhir
         return new SqlToken(SqlTokenType.STRING, _src[start..]);
     }
 

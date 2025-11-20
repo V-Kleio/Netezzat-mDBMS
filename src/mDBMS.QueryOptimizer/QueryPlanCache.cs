@@ -3,22 +3,22 @@ using mDBMS.Common.QueryData;
 namespace mDBMS.QueryOptimizer;
 
 /// <summary>
-/// Cache in memory untuk optimasi rencana eksekusi kueri.
+/// Cache in memory untuk optimasi eksekusi QueryPlan.
 /// Menggunakan TTL-based expiration (kedaluwarsa) dan algoritma basic LRU (Least Recently Used) eviction.
 /// </summary>
 internal sealed class QueryPlanCache
 {
     private sealed class CacheEntry
     {
+        public QueryPlan Plan { get; }
+        public DateTime CreatedAtUtc { get; }
+        public DateTime LastAccessedAtUtc { get; set; }
         public CacheEntry(QueryPlan plan)
         {
             Plan = plan;
             CreatedAtUtc = DateTime.UtcNow;
             LastAccessedAtUtc = CreatedAtUtc;
         }
-        public QueryPlan Plan { get; }
-        public DateTime CreatedAtUtc { get; }
-        public DateTime LastAccessedAtUtc { get; set; }
     }
     private readonly Dictionary<string, CacheEntry> entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly object syncRoot = new();
