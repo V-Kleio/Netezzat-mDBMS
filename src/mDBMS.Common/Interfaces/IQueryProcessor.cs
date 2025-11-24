@@ -3,5 +3,5 @@ namespace mDBMS.Common.Interfaces;
 
 public interface IQueryProcessor
 {
-    ExecutionResult ExecuteQuery(string? query);
+    ExecutionResult ExecuteQuery(string query, int transactionId);
 }

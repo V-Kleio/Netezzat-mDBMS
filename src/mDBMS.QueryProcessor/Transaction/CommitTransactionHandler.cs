@@ -5,18 +5,16 @@ namespace mDBMS.QueryProcessor.Transaction
 {
     internal class CommitTransactionHandler : IQueryHandler
     {
-        private readonly QueryProcessor _processor;
         private readonly IConcurrencyControlManager _concurrencyControlManager;
 
-        public CommitTransactionHandler(QueryProcessor processor, IConcurrencyControlManager concurrencyControlManager)
+        public CommitTransactionHandler(IConcurrencyControlManager concurrencyControlManager)
         {
-            _processor = processor;
             _concurrencyControlManager = concurrencyControlManager;
         }
 
-        public ExecutionResult HandleQuery(string query)
+        public ExecutionResult HandleQuery(string query, int transactionId)
         {
-            if (!_processor.ActiveTransactionId.HasValue)
+            if (transactionId != -1)
             {
                 return new ExecutionResult()
                 {
@@ -27,9 +25,8 @@ namespace mDBMS.QueryProcessor.Transaction
                 };
             }
 
-            var transactionId = _processor.ActiveTransactionId.Value;
             _concurrencyControlManager.EndTransaction(transactionId, true);
-            _processor.ActiveTransactionId = null;
+
             return new ExecutionResult()
             {
                 Query = query,

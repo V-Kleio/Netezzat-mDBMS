@@ -29,7 +29,7 @@ while (true)
         break;
     }
 
-    var result = queryProcessor.ExecuteQuery(input);
+    var result = queryProcessor.ExecuteQuery(input, -1);
     PrintResult(result);
 }
 

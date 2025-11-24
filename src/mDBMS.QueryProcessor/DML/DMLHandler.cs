@@ -9,29 +9,35 @@ namespace mDBMS.QueryProcessor.DML
     {
         private readonly IStorageManager _storageManager;
         private readonly IQueryOptimizer _queryOptimizer;
-        private readonly QueryProcessor _processor;
+        private readonly IConcurrencyControlManager _concurrencyControlManager;
+        private readonly IFailureRecoveryManager _failureRecoveryManager;
 
-        public DMLHandler(IStorageManager storageManager, IQueryOptimizer queryOptimizer, QueryProcessor processor)
-        {
+        public DMLHandler(
+            IStorageManager storageManager,
+            IQueryOptimizer queryOptimizer,
+            IConcurrencyControlManager concurrencyControlManager,
+            IFailureRecoveryManager failureRecoveryManager
+        ) {
             _storageManager = storageManager;
             _queryOptimizer = queryOptimizer;
-            _processor = processor;
+            _concurrencyControlManager = concurrencyControlManager;
+            _failureRecoveryManager = failureRecoveryManager;
         }
 
-        public ExecutionResult HandleQuery(string query)
+        public ExecutionResult HandleQuery(string query, int transactionId)
         {
             string upper = query.Split()[0].Trim().ToUpperInvariant();
             return upper switch
             {
-                "SELECT" => HandleSelect(query),
-                "INSERT" => HandleInsert(query),
-                "UPDATE" => HandleUpdate(query),
-                "DELETE" => HandleDelete(query),
-                _ => HandleUnrecognized(query)
+                "SELECT" => HandleSelect(query, transactionId),
+                "INSERT" => HandleInsert(query, transactionId),
+                "UPDATE" => HandleUpdate(query, transactionId),
+                "DELETE" => HandleDelete(query, transactionId),
+                _ => HandleUnrecognized(query, transactionId)
             };
         }
 
-        private ExecutionResult HandleSelect(string query)
+        private ExecutionResult HandleSelect(string query, int transactionId)
         {
             Query parsedQuery = _queryOptimizer.ParseQuery(query);
             QueryPlan queryPlan = _queryOptimizer.OptimizeQuery(parsedQuery);
@@ -59,7 +65,7 @@ namespace mDBMS.QueryProcessor.DML
                     Query = query,
                     Success = false,
                     Message = $"Operasi {step.Operation} untuk SELECT tidak didukung.",
-                    TransactionId = _processor.ActiveTransactionId
+                    TransactionId = transactionId
                 };
 
                 IEnumerable<Row> result = op.GetRows();
@@ -82,11 +88,11 @@ namespace mDBMS.QueryProcessor.DML
                 Success = true,
                 Message = $"",
                 Data = storage.lastResult,
-                TransactionId = _processor.ActiveTransactionId
+                TransactionId = transactionId
             };
         }
 
-        private ExecutionResult HandleInsert(string query)
+        private ExecutionResult HandleInsert(string query, int transactionId)
         {
             var data = new Dictionary<string, object>
             {
@@ -108,7 +114,7 @@ namespace mDBMS.QueryProcessor.DML
                 Query = query,
                 Success = true,
                 Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager.",
-                TransactionId = _processor.ActiveTransactionId,
+                TransactionId = transactionId,
                 TableName = tableName,
                 AfterImage = afterImage,
                 BeforeImage = null,
@@ -116,7 +122,7 @@ namespace mDBMS.QueryProcessor.DML
             };
         }
 
-        private ExecutionResult HandleUpdate(string query)
+        private ExecutionResult HandleUpdate(string query, int transactionId)
         {
             // ekstrak nama tabel dari query
             string tableName = ExtractTableNameFromQuery(query, "UPDATE");
@@ -142,7 +148,7 @@ namespace mDBMS.QueryProcessor.DML
                 Query = query,
                 Success = true,
                 Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager.",
-                TransactionId = _processor.ActiveTransactionId,
+                TransactionId = transactionId,
                 TableName = tableName,
                 BeforeImage = beforeImage,
                 AfterImage = afterImage,
@@ -150,7 +156,7 @@ namespace mDBMS.QueryProcessor.DML
             };
         }
 
-        private ExecutionResult HandleDelete(string query)
+        private ExecutionResult HandleDelete(string query, int transactionId)
         {
             // ekstrak nama tabel dari query
             string tableName = ExtractTableNameFromQuery(query, "DELETE");
@@ -171,7 +177,7 @@ namespace mDBMS.QueryProcessor.DML
                 Query = query,
                 Success = true,
                 Message = $"{deleted} row(s) dihapus melalui Storage Manager.",
-                TransactionId = _processor.ActiveTransactionId,
+                TransactionId = transactionId,
                 TableName = tableName,
                 BeforeImage = beforeImage,
                 AfterImage = null,
@@ -179,14 +185,14 @@ namespace mDBMS.QueryProcessor.DML
             };
         }
 
-        private ExecutionResult HandleUnrecognized(string query)
+        private ExecutionResult HandleUnrecognized(string query, int transactionId)
         {
             return new ExecutionResult()
             {
                 Query = query,
                 Success = false,
                 Message = "Tipe DML query tidak dikenali atau belum didukung.",
-                TransactionId = _processor.ActiveTransactionId
+                TransactionId = transactionId
             };
         }
 
