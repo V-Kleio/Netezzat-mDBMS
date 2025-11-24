@@ -1,21 +1,31 @@
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
+using mDBMS.QueryOptimizer.Core;
 using System.Text.RegularExpressions;
 
 namespace mDBMS.QueryOptimizer
 {
     /// <summary>
-    /// Engine utama untuk Query Optimization
-    /// Menghasilkan execution plan yang optimal
+    /// Engine utama untuk Query Optimization.
+    /// Orchestrator yang mengkoordinasikan parsing, building, dan optimization.
+    /// 
+    /// Flow:
+    /// 1. ParseQuery: SQL string -> Query object (via SqlLexer + SqlParser)
+    /// 2. OptimizeQuery: Query object -> QueryPlan dengan PlanNode tree
+    /// 3. Return: QueryPlan (dengan PlanTree dan Steps untuk backward compatibility)
+    /// 
+    /// Principle: Orchestration - delegate ke specialized components
     /// </summary>
     public class QueryOptimizerEngine : IQueryOptimizer {
         private readonly IStorageManager _storageManager;
-        private readonly CostEstimator _costEstimator;
+        private readonly ICostModel _costModel;
+        private readonly PlanBuilder _planBuilder;
 
         public QueryOptimizerEngine(IStorageManager storageManager)
         {
             _storageManager = storageManager;
-            _costEstimator = new CostEstimator(storageManager);
+            _costModel = new SimpleCostModel();
+            _planBuilder = new PlanBuilder(storageManager, _costModel);
         }
 
         /// <summary>
@@ -33,87 +43,62 @@ namespace mDBMS.QueryOptimizer
         }
 
         /// <summary>
-        /// Mengoptimalkan query dan menghasilkan execution plan yang efisien
+        /// Mengoptimalkan query dan menghasilkan execution plan yang efisien.
+        /// 
+        /// QueryPlan.PlanTree berisi tree structure.
+        /// QueryPlan.Steps berisi flat list (generated dari tree) untuk backward compatibility.
         /// </summary>
         /// <param name="query">Query yang akan dioptimalkan</param>
-        /// <returns>Optimized query execution plan</returns>
+        /// <returns>Optimized query execution plan dengan tree dan flat steps</returns>
         public QueryPlan OptimizeQuery(Query query) {
-            // Step 1: Aplikasikan aturan ekuivalensi aljabar relasional (heuristik)
-            var rewrittenQuery = QueryRewriter.ApplyHeuristicRules(query);
+            // Build plan tree menggunakan PlanBuilder (heuristic-based)
+            PlanNode planTree = _planBuilder.BuildPlan(query);
 
-            // Step 2: Generate plan alternatif berdasarkan query yang sudah di-rewrite
-            var alternativePlans = GenerateAlternativePlans(rewrittenQuery).ToList();
+            // Convert tree ke QueryPlan
+            var queryPlan = planTree.ToQueryPlan();
+            queryPlan.OriginalQuery = query;
+            queryPlan.PlanTree = planTree; // Set tree reference
 
-            // Step 3: Tambahkan plan berbasis heuristik murni
-            var heuristicPlan = HeuristicOptimizer.ApplyHeuristicOptimization(rewrittenQuery, _storageManager);
-            alternativePlans.Add(heuristicPlan);
+            return queryPlan;
+        }
 
-            // Step 4: Pilih plan dengan cost termurah (cost-based optimization)
-            var bestPlan = alternativePlans
-                .OrderBy(p => GetCost(p))
-                .FirstOrDefault();
-
-            if (bestPlan == null)
-            {
-                // Fallback: buat basic plan
-                bestPlan = new QueryPlan {
-                    OriginalQuery = query,
-                    Strategy = OptimizerStrategy.COST_BASED
-                };
-            }
-
-            // Step 5: Hitung cost akhir
-            bestPlan.TotalEstimatedCost = GetCost(bestPlan);
-
-            return bestPlan;
+        /// <summary>
+        /// Optimize query dan return PlanNode tree directly.
+        /// Ini adalah method untuk direct tree access.
+        /// </summary>
+        /// <param name="query">Query yang akan dioptimalkan</param>
+        /// <returns>Root node dari optimized plan tree</returns>
+        public PlanNode OptimizeQueryTree(Query query)
+        {
+            return _planBuilder.BuildPlan(query);
         }
 
         /// <summary>
         /// Menghitung estimasi cost untuk sebuah query plan
+        /// Cost sudah dihitung saat build tree, method ini hanya return total.
         /// </summary>
         /// <param name="plan">Query plan yang akan dihitung costnya</param>
         /// <returns>Estimasi cost dalam bentuk numerik</returns>
-        public double GetCost(QueryPlan plan) {
-            // Rumus dasar: Total Cost = sum(EstimatedStepCost)
-            // EstimatedStepCost dihitung oleh CostEstimator menggunakan statistik Storage Manager
-
-            double totalCost = 0.0;
-
-            for (int i = 0; i < plan.Steps.Count; i++) {
-                var step = plan.Steps[i];
-                var cost = _costEstimator.EstimateStepCost(step, plan.OriginalQuery);
-                step.EstimatedCost = cost;
-                totalCost += cost;
-            }
-
-            return totalCost;
+        public double GetCost(QueryPlan plan)
+        {
+            // Cost sudah calculated di PlanBuilder, tinggal return
+            return plan.TotalEstimatedCost;
         }
 
         /// <summary>
         /// Menggenerate beberapa alternatif query plan
+        /// Untuk sekarang hanya return satu plan dari PlanBuilder
+        /// TODO: Implement multiple plan alternatives dengan different strategies
         /// </summary>
         /// <param name="query">Query yang akan dianalisis</param>
         /// <returns>Daftar alternatif query plan</returns>
-        public IEnumerable<QueryPlan> GenerateAlternativePlans(Query query) {
-            // TODO: Generate beberapa alternatif rencana eksekusi
-            var plans = new List<QueryPlan>();
-
-            // Plan 1: Table Scan Strategy
-            plans.Add(GenerateTableScanPlan(query));
-
-            // Plan 2: Index Scan Strategy (jika dapat diterapkan)
-            var indexPlan = GenerateIndexScanPlan(query);
-            if (indexPlan != null) {
-                plans.Add(indexPlan);
-            }
-
-            // Plan 3: Filter Pushdown Strategy
-            plans.Add(GenerateFilterPushdownPlan(query));
-
-            return plans;
+        public IEnumerable<QueryPlan> GenerateAlternativePlans(Query query)
+        {
+            // Untuk sekarang, hanya return satu optimal plan dari PlanBuilder
+            yield return OptimizeQuery(query);
         }
+    
 
-        #region Helper Methods (Private)
 
         /// <summary>
         /// Generate plan dengan strategi table scan
@@ -318,8 +303,6 @@ namespace mDBMS.QueryOptimizer
 
             return plan;
         }
-
-        #endregion
 
         #region Qualification Helpers
         // Pastikan referensi kolom memakai fullname: table.column
