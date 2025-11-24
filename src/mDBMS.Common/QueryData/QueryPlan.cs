@@ -102,6 +102,13 @@ public class QueryPlan {
     public OptimizerStrategy Strategy { get; set; }
 
     /// <summary>
+    /// Root node dari plan tree (NEW: tree-based representation).
+    /// Jika ada, ini adalah representasi tree dari query plan.
+    /// Steps (flat list) akan di-generate dari tree ini.
+    /// </summary>
+    public PlanNode? PlanTree { get; set; }
+
+    /// <summary>
     /// Waktu pembuatan query plan
     /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.Now;
