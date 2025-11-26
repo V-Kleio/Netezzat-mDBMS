@@ -302,6 +302,115 @@ namespace mDBMS.StorageManager
             }
         }
 
-        public int DeleteBlock(DataDeletion dataDeletion) { return 0; } 
+        public int DeleteBlock(DataDeletion dataDeletion)
+        {
+            string tableName = dataDeletion.Table;
+            string fileName = $"{tableName.ToLower()}.dat";
+            string fullPath = Path.Combine(DataPath, fileName);
+
+            if (!File.Exists(fullPath)) return 0;
+
+            TableSchema? schema = GetSchemaFromFile(fileName);
+            if (schema == null) return 0;
+
+            int deletedCount = 0;
+            long fileSize = new FileInfo(fullPath).Length;
+
+            // Baca semua blok, filter row yang match kondisi, rebuild blok tanpa row tersebut
+            var allBlocks = new List<byte[]>();
+            var blockOffsets = new List<long>();
+
+            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read))
+            {
+                if (fs.Length <= FileHeaderSize) return 0;
+
+                fs.Seek(FileHeaderSize, SeekOrigin.Begin);
+                byte[] buffer = new byte[BlockSize];
+                long currentOffset = FileHeaderSize;
+
+                // Baca semua blok
+                while (fs.Read(buffer, 0, BlockSize) > 0)
+                {
+                    byte[] blockCopy = new byte[BlockSize];
+                    Buffer.BlockCopy(buffer, 0, blockCopy, 0, BlockSize);
+                    allBlocks.Add(blockCopy);
+                    blockOffsets.Add(currentOffset);
+                    currentOffset += BlockSize;
+                }
+            }
+
+            // Process setiap blok: filter out rows yang match deletion condition
+            var newBlocks = new List<byte[]>();
+
+            for (int i = 0; i < allBlocks.Count; i++)
+            {
+                var blockData = allBlocks[i];
+                var rows = BlockSerializer.DeserializeBlock(schema, blockData);
+
+                // Filter row: Keep hanya yang TIDAK match kondisi delete
+                var survivingRows = new List<Row>();
+                int deletedInThisBlock = 0;
+
+                foreach (var row in rows)
+                {
+                    if (CheckCondition(row, dataDeletion.Condition))
+                    {
+                        deletedInThisBlock++;
+                        // Hapus dari index jika ada
+                        RemoveFromIndexes(tableName, row, blockOffsets[i]);
+                    }
+                    else
+                    {
+                        survivingRows.Add(row);
+                    }
+                }
+
+                deletedCount += deletedInThisBlock;
+
+                // Rebuild blok hanya dengan surviving rows
+                if (survivingRows.Count > 0)
+                {
+                    var serializedRows = new List<byte[]>();
+                    foreach (var row in survivingRows)
+                    {
+                        serializedRows.Add(RowSerializer.SerializeRow(schema, row));
+                    }
+                    newBlocks.Add(BlockSerializer.CreateBlock(serializedRows));
+                }
+                // Jika blok kosong (semua row dihapus), jangan masukkan ke newBlocks
+            }
+
+            // Tulis ulang file dengan blok baru (tanpa blok yang kosong)
+            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Write))
+            {
+                // Preserve file header (4KB pertama)
+                fs.Seek(FileHeaderSize, SeekOrigin.Begin);
+
+                foreach (var block in newBlocks)
+                {
+                    fs.Write(block, 0, block.Length);
+                }
+
+                // Truncate file jika ada blok yang dihapus
+                fs.SetLength(FileHeaderSize + (newBlocks.Count * BlockSize));
+            }
+
+            return deletedCount;
+        }
+
+        // Helper: Remove entry dari index
+        private void RemoveFromIndexes(string table, Row row, long blockOffset)
+        {
+            foreach (var index in _activeIndexes.Values)
+            {
+                if (index.TableName.Equals(table, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (row.Columns.TryGetValue(index.ColumnName, out object? val) && val != null)
+                    {
+                        index.Remove(val, blockOffset);
+                    }
+                }
+            }
+        }
     }
 }
