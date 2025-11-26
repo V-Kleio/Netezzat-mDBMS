@@ -39,5 +39,21 @@ namespace mDBMS.StorageManager
             _index.TryGetValue(key, out var offsets);
             return offsets;
         }
+
+        public void Remove(object key, long blockOffset)
+        {
+            if (key == null) return;
+
+            if (_index.TryGetValue(key, out var offsets))
+            {
+                offsets.Remove(blockOffset);
+
+                // Jika list kosong setelah remove, hapus key dari index
+                if (offsets.Count == 0)
+                {
+                    _index.Remove(key);
+                }
+            }
+        }
     }
 }
