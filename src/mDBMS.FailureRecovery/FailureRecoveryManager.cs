@@ -411,5 +411,174 @@ namespace mDBMS.FailureRecovery
                 return 0;
             }
         }
+
+        // ======================================== Recovery Pipeline ========================================
+
+        /// <summary>
+        /// Dari Log Entry -> Undo Query, make/lewat QP
+        /// </summary>
+        /// <param name="entry"></param>
+        /// <returns>true if successful, false otherwise</returns>
+        private bool ExecuteRecoveryQuery(LogEntry entry)
+        {
+            Console.WriteLine($"[FRM UNDO]: Menjalankan recovery untuk LSN={entry.LSN}, Op={entry.OperationType}");
+
+            if (_queryProcessor == null)
+            {
+                Console.Error.WriteLine("[ERROR FRM]: Query Processor tidak tersedia untuk menjalankan recovery query");
+                return false;
+            }
+
+            try
+            {
+                // Skip transaction control operations (BEGIN, COMMIT, ABORT)
+                if (entry.OperationType == LogOperationType.BEGIN_TRANSACTION ||
+                    entry.OperationType == LogOperationType.COMMIT ||
+                    entry.OperationType == LogOperationType.ABORT)
+                {
+                    Console.WriteLine($"[FRM UNDO]: Skipping {entry.OperationType} - tidak perlu di-undo");
+                    return true;
+                }
+
+                // Generate undo SQL based on operation type
+                string undoQuery = GenerateUndoQuery(entry);
+
+                if (string.IsNullOrEmpty(undoQuery))
+                {
+                    Console.WriteLine($"[FRM UNDO]: Tidak ada undo query untuk LSN={entry.LSN}");
+                    return true;
+                }
+
+                Console.WriteLine($"[FRM UNDO]: Executing: {undoQuery}");
+
+                // Execute undo query via Query Processor
+                var result = _queryProcessor.ExecuteQuery(undoQuery);
+
+                if (result.Success)
+                {
+                    Console.WriteLine($"[FRM UNDO]: Berhasil undo LSN={entry.LSN}");
+                    return true;
+                }
+                else
+                {
+                    Console.Error.WriteLine($"[FRM UNDO]: Gagal undo LSN={entry.LSN} - {result.Message}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Exception saat execute recovery query - {ex.Message}");
+                return false;
+            }
+        }
+
+        private string GenerateUndoQuery(LogEntry entry)
+        {
+            switch (entry.OperationType)
+            {
+                case LogOperationType.INSERT:
+                    // Undo INSERT: DELETE row yang di-insert
+                    return GenerateUndoForInsert(entry);
+
+                case LogOperationType.UPDATE:
+                    // Undo UPDATE: Restore BeforeImage
+                    return GenerateUndoForUpdate(entry);
+
+                case LogOperationType.DELETE:
+                    // Undo DELETE: Re-insert BeforeImage
+                    return GenerateUndoForDelete(entry);
+
+                default:
+                    return string.Empty;
+            }
+        }
+
+        // Undo INSERT = DELETE by RowIdentifier
+        private string GenerateUndoForInsert(LogEntry entry)
+        {
+            if (string.IsNullOrEmpty(entry.TableName) || string.IsNullOrEmpty(entry.RowIdentifier))
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Missing TableName or RowIdentifier untuk undo INSERT");
+                return string.Empty;
+            }
+
+            // Assuming RowIdentifier contains primary key information
+            // Format: DELETE FROM table WHERE primary_key = value
+            return $"DELETE FROM {entry.TableName} WHERE {entry.RowIdentifier}";
+        }
+
+        /// Undo UPDATE = Restore BeforeImage
+        private string GenerateUndoForUpdate(LogEntry entry)
+        {
+            if (string.IsNullOrEmpty(entry.TableName) ||
+                string.IsNullOrEmpty(entry.RowIdentifier) ||
+                string.IsNullOrEmpty(entry.BeforeImage) ||
+                entry.BeforeImage == "NULL")
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Missing data untuk undo UPDATE");
+                return string.Empty;
+            }
+
+            try
+            {
+                // Parse BeforeImage (format: {"col1":"val1","col2":"val2"})
+                var beforeData = ParseRowData(entry.BeforeImage);
+
+                if (beforeData.Count == 0)
+                {
+                    Console.Error.WriteLine($"[ERROR FRM]: Failed to parse BeforeImage");
+                    return string.Empty;
+                }
+
+                // Build SET clause
+                var setClause = string.Join(", ",
+                    beforeData.Select(kv => $"{kv.Key} = '{EscapeSqlString(kv.Value)}'"));
+
+                // Format: UPDATE table SET col1=val1, col2=val2 WHERE primary_key = value
+                return $"UPDATE {entry.TableName} SET {setClause} WHERE {entry.RowIdentifier}";
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Exception generating undo UPDATE - {ex.Message}");
+                return string.Empty;
+            }
+        }
+
+        /// Undo DELETE = Re-insert BeforeImage
+        private string GenerateUndoForDelete(LogEntry entry)
+        {
+            if (string.IsNullOrEmpty(entry.TableName) ||
+                string.IsNullOrEmpty(entry.BeforeImage) ||
+                entry.BeforeImage == "NULL")
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Missing data untuk undo DELETE");
+                return string.Empty;
+            }
+
+            try
+            {
+                // Parse BeforeImage
+                var beforeData = ParseRowData(entry.BeforeImage);
+
+                if (beforeData.Count == 0)
+                {
+                    Console.Error.WriteLine($"[ERROR FRM]: Failed to parse BeforeImage");
+                    return string.Empty;
+                }
+
+                // Build column names and values
+                var columns = string.Join(", ", beforeData.Keys);
+                var values = string.Join(", ",
+                    beforeData.Values.Select(v => $"'{EscapeSqlString(v)}'"));
+
+                // Format: INSERT INTO table (col1, col2) VALUES (val1, val2)
+                return $"INSERT INTO {entry.TableName} ({columns}) VALUES ({values})";
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Exception generating undo DELETE - {ex.Message}");
+                return string.Empty;
+            }
+        }
     }
 }
