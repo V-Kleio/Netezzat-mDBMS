@@ -8,7 +8,7 @@ using mDBMS.FailureRecovery;
 var storageManager = new StorageEngine();
 var optimizer = new QueryOptimizerEngine(storageManager);
 var concurrencyControl = new ConcurrencyControlManager();
-var failureRecovery = new FailureRecoveryManager();
+var failureRecovery = new FailureRecoveryManager(null, storageManager);
 var queryProcessor = new QueryProcessor(storageManager, optimizer, concurrencyControl, failureRecovery);
 
 Console.WriteLine("mDBMS CLI siap digunakan. Ketik EXIT untuk keluar.");

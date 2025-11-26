@@ -14,17 +14,20 @@ namespace mDBMS.FailureRecovery
         // Dependency untuk Query Processor (untuk recovery query)
         private IQueryProcessor? _queryProcessor;
 
+        // Dependency untuk Storage Manager (untuk checkpoint flush)
+        private IStorageManager? _storageManager;
+
         private readonly string _logFilePath;
         private readonly string _logDirectory;
         private long _currentLSN;
         private readonly object _logLock = new object();
         private byte[]? _buffer;
 
-        public FailureRecoveryManager(IQueryProcessor? queryProcessor = null)
+        public FailureRecoveryManager(IQueryProcessor? queryProcessor = null, IStorageManager? storageManager = null)
         {
             _bufferPool = new BufferPool();
             _queryProcessor = queryProcessor;
-            // _storageManager = storageManager;
+            _storageManager = storageManager;
 
             _logDirectory = Path.Combine(Directory.GetCurrentDirectory(), "logs");
             _logFilePath = Path.Combine(_logDirectory, "mDBMS.log");
@@ -238,10 +241,155 @@ namespace mDBMS.FailureRecovery
             }
         }
 
-        // TODO (Checkpoint)
+        /// <summary>
+        /// Implementasi Checkpoint: Flush dirty pages dari buffer ke disk dan tulis checkpoint entry ke log
+        /// Flownya:
+        /// 1. ambil semua dirty pages dari buffer
+        /// 2. apply setiap perubahan ke disk via Storage Manager
+        /// 3. flush buffer (kosongkan)
+        /// 4. tulis checkpoint entry ke log
+        /// </summary>
         public void SaveCheckpoint()
         {
-            Console.WriteLine("[STUB FRM]: SaveCheckpoint dipanggil");
+            Console.WriteLine("[FRM CHECKPOINT]: Memulai proses checkpoint");
+
+            lock (_logLock)
+            {
+                try
+                {
+                    // 1. Ambil semua dirty pages dari buffer
+                    var dirtyPages = _bufferPool.GetDirtyPages();
+
+                    if (dirtyPages.Count == 0)
+                    {
+                        Console.WriteLine("[FRM CHECKPOINT]: Tidak ada dirty pages untuk di-flush");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[FRM CHECKPOINT]: Ditemukan {dirtyPages.Count} dirty pages");
+
+                        // 2. Apply setiap perubahan ke disk via Storage Manager
+                        int successCount = 0;
+                        int failCount = 0;
+
+                        foreach (var page in dirtyPages)
+                        {
+                            bool success = FlushPageToDisk(page);
+
+                            if (success)
+                            {
+                                successCount++;
+                                _bufferPool.MarkClean(page.TableName, page.BlockID);
+                            }
+                            else
+                            {
+                                failCount++;
+                            }
+                        }
+
+                        Console.WriteLine($"[FRM CHECKPOINT]: Flush selesai - Success: {successCount}, Failed: {failCount}");
+
+                        if (failCount > 0)
+                        {
+                            Console.Error.WriteLine($"[ERROR FRM]: Checkpoint tidak lengkap. {failCount} pages gagal di-flush");
+                        }
+                    }
+
+                    // 3. Flush buffer (kosongkan)
+                    var remainingDirtyPages = _bufferPool.FlushAll();
+
+                    if (remainingDirtyPages.Count > 0)
+                    {
+                        Console.WriteLine($"[FRM CHECKPOINT]: Buffer di-flush, sisa {remainingDirtyPages.Count} dirty pages");
+                    }
+
+                    // 4. Tulis checkpoint entry ke log
+                    // Ambil daftar transaksi aktif (dari log entries yang belum COMMIT/ABORT)
+                    var activeTransactions = GetActiveTransactions();
+
+                    var checkpointEntry = LogEntry.CreateCheckpoint(_currentLSN, activeTransactions);
+                    string serializedLog = checkpointEntry.Serialize();
+
+                    File.AppendAllText(_logFilePath, serializedLog + Environment.NewLine);
+
+                    Console.WriteLine($"[FRM CHECKPOINT]: Checkpoint entry ditulis ke log (LSN={_currentLSN}, Active Txns={activeTransactions.Count})");
+
+                    // Increment LSN
+                    _currentLSN++;
+
+                    Console.WriteLine("[FRM CHECKPOINT]: Checkpoint selesai!");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[ERROR FRM]: Gagal melakukan checkpoint - {ex.Message}");
+                    Console.Error.WriteLine($"[ERROR FRM]: Stack Trace: {ex.StackTrace}");
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Flush page ke disk via Storage Manager
+        /// </summary>
+        private bool FlushPageToDisk(Page page)
+        {
+            if (_storageManager == null)
+            {
+                // TODO (SM): Integrate dengan Storage Manager
+                return false;
+            }
+
+            try
+            {
+                // TODO (SM): Convert Page object ke DataWrite format yang sesuai untuk SM
+                // Contoh implementasi:
+                // var dataWrite = ConvertPageToDataWrite(page);
+                // int result = _storageManager.WriteBlock(dataWrite);
+                // return result > 0;
+
+                // Sementara return false karena belum terintegrasi
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[FRM]: Gagal flush page {page.TableName}-{page.BlockID} - {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Ambil daftar transaksi yang masih aktif (belum COMMIT/ABORT)
+        /// </summary>
+        private List<int> GetActiveTransactions()
+        {
+            var activeTransactions = new HashSet<int>();
+
+            try
+            {
+                if (!File.Exists(_logFilePath))
+                    return new List<int>();
+
+                var logEntries = ReadAllLogEntries();
+
+                foreach (var entry in logEntries)
+                {
+                    if (entry.OperationType == LogOperationType.BEGIN_TRANSACTION)
+                    {
+                        activeTransactions.Add(entry.TransactionId);
+                    }
+                    else if (entry.OperationType == LogOperationType.COMMIT ||
+                             entry.OperationType == LogOperationType.ABORT)
+                    {
+                        activeTransactions.Remove(entry.TransactionId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Gagal membaca active transactions - {ex.Message}");
+            }
+
+            return activeTransactions.ToList();
         }
 
 
@@ -676,8 +824,7 @@ namespace mDBMS.FailureRecovery
 
         public byte[] ReadFromBuffer(string tableName, int blockId)
         {
-            Console.WriteLine($"[FRM-BUFFER]: ReadFromBuffer dipanggil, Table={tableName}, BlockId={blockId}");
-            Page? page =_bufferPool.GetPage(tableName, blockId);
+            Page? page = _bufferPool.GetPage(tableName, blockId);
 
             if (page != null)
             {
@@ -689,35 +836,27 @@ namespace mDBMS.FailureRecovery
 
         public void WriteToBuffer(Page page)
         {
-            Console.WriteLine($"[FRM-BUFFER]: WriteToBuffer dipanggil, Table={page.TableName}, BlockId={page.BlockID}, IsDirty={page.IsDirty}");
-
             Page? evictedPage = _bufferPool.AddOrUpdatePage(page);
 
-            if (evictedPage != null)
+            if (evictedPage != null && evictedPage.IsDirty)
             {
-                if (evictedPage.IsDirty)
+                // Flush evicted dirty page to disk
+                bool success = FlushPageToDisk(evictedPage);
+                if (success)
                 {
-                    Console.WriteLine($"[FRM-BUFFER]: Eviction - Flushing dirty page {evictedPage.BlockID} of {evictedPage.TableName}");
-                    FlushPage(evictedPage);
+                    _bufferPool.MarkClean(evictedPage.TableName, evictedPage.BlockID);
                 }
             }
         }
 
-        // TODO: Di sini  memanggil IStorageManager (sm.WriteBlock)
-        private void FlushPage (Page page)
+        public List<Page> GetDirtyPages()
         {
-            // Namun, karena WriteBlock SM menerima DataWrite, perlu helper/wrapper
-            // untuk mengubah Page object menjadi raw bytes yang siap ditulis ke disk.
+            return _bufferPool.GetDirtyPages();
+        }
 
-            Console.WriteLine($"[FRM-FLUSH]: Memulai I/O Tulis ke disk untuk {page.TableName}-{page.BlockID}");
-
-            // Implementasi stub sementara:
-            // if (_storageManager != null) {
-            //     _storageManager.WriteBlock(logic konversi Page ke DataWrite/byte[]);
-            // }
-
-            // Setelah sukses ditulis ke disk, halaman menjadi bersih lagi.
-            page.IsDirty = false;
+        public List<Page> FlushAll()
+        {
+            return _bufferPool.FlushAll();
         }
 
     }
