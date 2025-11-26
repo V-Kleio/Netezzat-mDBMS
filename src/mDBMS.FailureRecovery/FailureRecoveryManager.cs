@@ -14,6 +14,9 @@ namespace mDBMS.FailureRecovery
         // DI later
         // private readonly IStorageManager _storageManager;
 
+        // Dependency untuk Query Processor (untuk recovery query)
+        private IQueryProcessor? _queryProcessor;
+
         private readonly string _logFilePath;
         private readonly string _logDirectory;
         private long _currentLSN;
@@ -84,8 +87,130 @@ namespace mDBMS.FailureRecovery
 
         public void Recover(RecoverCriteria criteria)
         {
-            Console.WriteLine($"[STUB FRM]: Recover dipanggil untuk TransactionId '{criteria.TransactionId}' pada Timestamp '{criteria.Timestamp}'");
+            Console.WriteLine($"[FRM RECOVER]: Memulai recovery untuk TransactionId={criteria.TransactionId}, Timestamp={criteria.Timestamp}");
+
+            if (_queryProcessor == null)
+            {
+                Console.Error.WriteLine("[ERROR FRM]: Query Processor belum diset. Recovery tidak dapat dilakukan.");
+                return;
+            }
+
+            if (!File.Exists(_logFilePath))
+            {
+                Console.WriteLine("[FRM RECOVER]: File log tidak ditemukan. Tidak ada yang perlu di-recover.");
+                return;
+            }
+
+            try
+            {
+                // Baca semua log entries
+                var logEntries = ReadAllLogEntries();
+                
+                if (logEntries.Count == 0)
+                {
+                    Console.WriteLine("[FRM RECOVER]: Log kosong. Tidak ada yang perlu di-recover.");
+                    return;
+                }
+
+                Console.WriteLine($"[FRM RECOVER]: Ditemukan {logEntries.Count} log entries");
+
+                // Proses recovery secara backward (dari entry terakhir)
+                int recoveredCount = 0;
+                for (int i = logEntries.Count - 1; i >= 0; i--)
+                {
+                    var logEntry = logEntries[i];
+
+                    // Cek apakah entry ini memenuhi kriteria recovery
+                    if (!ShouldRecoverEntry(logEntry, criteria))
+                    {
+                        // Jika kriteria tidak terpenuhi, hentikan recovery
+                        Console.WriteLine($"[FRM RECOVER]: Recovery berhenti di LSN={logEntry.LSN} (kriteria tidak terpenuhi)");
+                        break;
+                    }
+
+                    // Jalankan recovery query untuk entry ini
+                    bool success = ExecuteRecoveryQuery(logEntry); // belum diimplementasi
+                    
+                    if (success)
+                    {
+                        recoveredCount++;
+                        Console.WriteLine($"[FRM RECOVER]: Berhasil recover LSN={logEntry.LSN}, Op={logEntry.OperationType}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[FRM RECOVER]: Gagal recover LSN={logEntry.LSN}, Op={logEntry.OperationType}");
+                    }
+                }
+
+                Console.WriteLine($"[FRM RECOVER]: Recovery selesai. Total {recoveredCount} operasi di-recover.");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Gagal melakukan recovery - {ex.Message}");
+                Console.Error.WriteLine($"[ERROR FRM]: Stack Trace: {ex.StackTrace}");
+            }
         }
+
+        /// Baca semua log entries dari file
+        private List<LogEntry> ReadAllLogEntries()
+        {
+            var entries = new List<LogEntry>();
+            
+            try
+            {
+                var lines = File.ReadAllLines(_logFilePath);
+                
+                foreach (var line in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                        continue;
+
+                    try
+                    {
+                        var entry = LogEntry.Deserialize(line);
+                        entries.Add(entry);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[WARNING FRM]: Gagal parse log entry - {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Gagal membaca file log - {ex.Message}");
+                throw;
+            }
+
+            return entries;
+        }
+
+        private bool ShouldRecoverEntry(LogEntry entry, RecoverCriteria criteria)
+        {
+            // Jika TransactionId diset (bukan 0 atau -1), check by TransactionId
+            if (criteria.TransactionId > 0)
+            {
+                // Recover semua operasi dari transaksi ini
+                return entry.TransactionId == criteria.TransactionId;
+            }
+
+            // Jika Timestamp diset, check by Timestamp
+            if (criteria.Timestamp != DateTime.MinValue)
+            {
+                // Recover semua operasi setelah timestamp ini
+                return entry.Timestamp >= criteria.Timestamp;
+            }
+
+            // Default: tidak recover
+            return false;
+        }
+
+        private bool ExecuteRecoveryQuery(LogEntry entry)
+        {
+            Console.WriteLine($"[FRM RECOVER]: Menjalankan recovery untuk LSN={entry.LSN}, Op={entry.OperationType}");
+            return false; // stub sementara
+        }
+
 
         public void SaveCheckpoint()
         {
