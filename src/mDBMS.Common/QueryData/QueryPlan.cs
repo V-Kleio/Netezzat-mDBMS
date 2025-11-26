@@ -13,7 +13,10 @@ public enum OperationType {
     SORT,
     FILTER,
     PROJECTION,
-    AGGREGATION
+    AGGREGATION,
+    UPDATE
+    // INSERT
+    // DELETE
 }
 
 /// <summary>

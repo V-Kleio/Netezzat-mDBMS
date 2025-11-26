@@ -38,7 +38,7 @@ namespace mDBMS.QueryOptimizer
             var lexer = new SqlLexer(queryString);
             var tokens = lexer.Tokenize();
             var parser = new SqlParser(tokens);
-            var query = parser.ParseSelect();
+            var query = parser.Parser();
             return query;
         }
 
@@ -51,6 +51,11 @@ namespace mDBMS.QueryOptimizer
         /// <param name="query">Query yang akan dioptimalkan</param>
         /// <returns>Optimized query execution plan dengan tree dan flat steps</returns>
         public QueryPlan OptimizeQuery(Query query) {
+            // Handle UPDATE bypass
+            if (query.Type == QueryType.UPDATE)
+            {
+                return GenerateUpdatePlan(query);
+            }
             // Build plan tree menggunakan PlanBuilder (heuristic-based)
             PlanNode planTree = _planBuilder.BuildPlan(query);
 
@@ -60,6 +65,63 @@ namespace mDBMS.QueryOptimizer
             queryPlan.PlanTree = planTree; // Set tree reference
 
             return queryPlan;
+        }
+
+        /// <summary>
+        /// Generate query plan untuk UPDATE statement.
+        /// </summary>
+        private QueryPlan GenerateUpdatePlan(Query query) {
+            var plan = new QueryPlan {
+                OriginalQuery = query,
+                Strategy = OptimizerStrategy.RULE_BASED,
+                PlanTree = null
+            };
+
+            var stats = _storageManager.GetStats(query.Table);
+            double selectivity = _costModel.EstimateSelectivity(query.WhereClause ?? "", stats);
+            double affectedRows = stats.TupleCount * selectivity;
+
+            // Cek apakah ada index yang bisa digunakan untuk WHERE
+            var indexedColumns = stats.Indices.Select(i => i.Item1).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var whereColumns = SqlParserHelpers.ExtractPredicateColumns(query.WhereClause);
+            var indexedWhereCol = whereColumns.FirstOrDefault(c => indexedColumns.Contains(c));
+            bool useIndex = indexedWhereCol != null && !string.IsNullOrWhiteSpace(query.WhereClause);
+
+            // Cari baris (Scan/Seek)
+            plan.Steps.Add(new QueryPlanStep {
+                Order = 1,
+                Operation = useIndex ? OperationType.INDEX_SEEK : OperationType.TABLE_SCAN,
+                Description = useIndex 
+                    ? $"Index seek on {query.Table} using index on {indexedWhereCol}"
+                    : $"Full table scan on {query.Table}",
+                Table = query.Table,
+                IndexUsed = indexedWhereCol,
+                EstimatedCost = useIndex 
+                    ? _costModel.EstimateIndexSeek(stats, selectivity)
+                    : _costModel.EstimateTableScan(stats),
+                Parameters = new Dictionary<string, object?> { ["predicate"] = query.WhereClause }
+            });
+
+            // Qualify column names di UpdateOperations
+            var qualifiedUpdates = query.UpdateOperations.ToDictionary(
+                kvp => kvp.Key.Contains('.') ? kvp.Key : $"{query.Table}.{kvp.Key}",
+                kvp => kvp.Value
+            );
+
+            // Update
+            double updateCost = _costModel.EstimateUpdate(affectedRows, stats.BlockingFactor);
+            plan.Steps.Add(new QueryPlanStep {
+                Order = 2,
+                Operation = OperationType.UPDATE,
+                Description = $"Update {query.UpdateOperations.Count} column(s) in {query.Table}",
+                Table = query.Table,
+                EstimatedCost = updateCost,
+                Parameters = new Dictionary<string, object?> { ["updates"] = query.UpdateOperations }
+            });
+
+            plan.TotalEstimatedCost = plan.Steps.Sum(s => s.EstimatedCost);
+            plan.EstimatedRows = (int)affectedRows;
+            return plan;
         }
 
         /// <summary>

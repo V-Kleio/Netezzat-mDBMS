@@ -98,4 +98,12 @@ public interface ICostModel
     /// <param name="stats">Statistik tabel untuk analisis</param>
     /// <returns>Selectivity factor (0.0 - 1.0)</returns>
     double EstimateSelectivity(string condition, Statistic stats);
+
+    /// <summary>
+    /// Estimasi cost untuk operasi UPDATE.
+    /// </summary>
+    /// <param name="affectedRows">Jumlah baris yang akan diupdate</param>
+    /// <param name="blockSize">Ukuran blok penyimpanan (untuk menghitung I/O)</param>
+    /// <returns>Estimated cost</returns>
+    double EstimateUpdate(double affectedRows, double blockSize, int indexCount = 0);
 }
