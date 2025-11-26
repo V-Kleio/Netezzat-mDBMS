@@ -45,6 +45,11 @@ public class SimpleCostModel : ICostModel
     /// </summary>
     private const double HASH_BUILD_COST_PER_ROW = 0.02;
 
+    /// <summary>
+    /// Cost untuk menulis satu row ke disk (I/O operation).
+    /// </summary>
+    private const double WRITE_COST_FACTOR = 2.0;
+
     // === Implementation ICostModel ===
 
     /// <summary>
@@ -196,7 +201,16 @@ public class SimpleCostModel : ICostModel
         double sortCost = EstimateSort(outerRows) + EstimateSort(innerRows);
         return mergeCost + sortCost;
     }
-
+    // <summary>
+    /// Estimasi cost untuk operasi UPDATE.
+    /// </summary>
+    public double EstimateUpdate(double affectedRows, double blockingFactor, int indexCount = 0) {
+        double estimatedBlocks = Math.Ceiling(affectedRows / Math.Max(blockingFactor, 1)); 
+        double ioCost = estimatedBlocks * IO_COST_PER_BLOCK * WRITE_COST_FACTOR;
+        double cpuCost = affectedRows * CPU_COST_PER_ROW;
+        double indexMaintenanceCost = affectedRows * indexCount * HASH_BUILD_COST_PER_ROW;
+        return ioCost + cpuCost + indexMaintenanceCost;
+    }
     /// <summary>
     /// Estimasi selectivity untuk condition.
     /// Menentukan berapa persen rows yang akan lolos filter.
