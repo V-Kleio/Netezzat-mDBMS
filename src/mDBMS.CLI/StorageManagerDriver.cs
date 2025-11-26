@@ -131,6 +131,81 @@ class StorageManagerDriver
         else
             Console.WriteLine("ERROR: Data tidak ditemukan.\n");
 
+
+        // ==========================================
+        // TEST F: DELETE (TASK Milestone 3)
+        // ==========================================
+        Console.WriteLine("--- TEST F: Menghapus Data (DeleteBlock) ---");
+
+        // Hitung jumlah row sebelum delete
+        var beforeDelete = storage.ReadBlock(new DataRetrieval("Students", new[] { "*" }, null));
+        int countBeforeDelete = 0;
+        foreach (var _ in beforeDelete) countBeforeDelete++;
+
+        Console.WriteLine($"Jumlah row sebelum delete: {countBeforeDelete}");
+
+        // Hapus row dengan StudentID = 5
+        var deleteCondition = new Condition
+        {
+            lhs = "StudentID",
+            opr = Condition.Operation.EQ,
+            rhs = "5"
+        };
+        var deletionRequest = new DataDeletion("Students", deleteCondition);
+        int deletedCount = storage.DeleteBlock(deletionRequest);
+
+        Console.WriteLine($"[DELETE] Jumlah row terhapus: {deletedCount}");
+
+        // Hitung jumlah row setelah delete
+        var afterDelete = storage.ReadBlock(new DataRetrieval("Students", new[] { "*" }, null));
+        int countAfterDelete = 0;
+        foreach (var _ in afterDelete) countAfterDelete++;
+
+        Console.WriteLine($"Jumlah row setelah delete: {countAfterDelete}");
+
+        // Verifikasi bahwa StudentID = 5 sudah tidak ada
+        var verifyDelete = storage.ReadBlock(new DataRetrieval("Students", new[] { "*" }, deleteCondition));
+        bool stillExists = false;
+        foreach (var _ in verifyDelete) stillExists = true;
+
+        if (deletedCount > 0 && countAfterDelete == countBeforeDelete - deletedCount && !stillExists)
+            Console.WriteLine("SUCCESS: DeleteBlock berfungsi dengan baik!\n");
+        else
+            Console.WriteLine("ERROR: DeleteBlock gagal atau data masih ada.\n");
+
+
+        // ==========================================
+        // TEST G: DELETE MULTIPLE (Bonus)
+        // ==========================================
+        Console.WriteLine("--- TEST G: Menghapus Multiple Rows ---");
+
+        // Hapus semua row dengan StudentID >= 45 (seharusnya ada beberapa row)
+        // Note: Condition saat ini hanya support EQ, jadi kita test dengan kondisi spesifik
+        // Kita hapus row dengan StudentID = 10
+        var deleteCondition2 = new Condition
+        {
+            lhs = "StudentID",
+            opr = Condition.Operation.EQ,
+            rhs = "10"
+        };
+        var deletionRequest2 = new DataDeletion("Students", deleteCondition2);
+        int deletedCount2 = storage.DeleteBlock(deletionRequest2);
+
+        Console.WriteLine($"[DELETE] Jumlah row terhapus (StudentID=10): {deletedCount2}");
+
+        if (deletedCount2 > 0)
+            Console.WriteLine("SUCCESS: Delete kondisi lain juga berfungsi!\n");
+        else
+            Console.WriteLine("WARNING: Tidak ada data terhapus (mungkin sudah tidak ada).\n");
+
+
+        // ==========================================
+        // TEST H: DELETE WITHOUT CONDITION (Delete All - Dangerous!)
+        // ==========================================
+        Console.WriteLine("--- TEST H: Delete Without Condition (Hati-hati!) ---");
+        Console.WriteLine("SKIP: Test ini di-skip karena berbahaya (akan hapus semua data).\n");
+
+
         Console.WriteLine("=== ALL TESTS COMPLETED ===");
     }
 
