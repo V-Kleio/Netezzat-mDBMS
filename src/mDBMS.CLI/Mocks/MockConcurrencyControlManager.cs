@@ -54,5 +54,10 @@ namespace mDBMS.CLI.Mocks
             Console.WriteLine($"[MOCK CCM]: CommitTransaction dipanggil. ID = {transactionId}");
             return true;
         }
+
+        public void LogObject(DatabaseObject obj, int transactionId)
+        {
+            Console.WriteLine($"[MOCK CCM]: LogObject dipanggil. T{transactionId} mengakses {obj.ToQualifiedString()}");
+        }
     }
 }
