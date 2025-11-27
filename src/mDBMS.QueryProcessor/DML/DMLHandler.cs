@@ -3,6 +3,8 @@ using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
 using mDBMS.Common.Transaction;
 
+// TODO: Get therapy
+
 namespace mDBMS.QueryProcessor.DML
 {
     internal class DMLHandler : IQueryHandler
@@ -124,32 +126,86 @@ namespace mDBMS.QueryProcessor.DML
 
         private ExecutionResult HandleUpdate(string query, int transactionId)
         {
-            // ekstrak nama tabel dari query
-            string tableName = ExtractTableNameFromQuery(query, "UPDATE");
+            Query parsedQuery = _queryOptimizer.ParseQuery(query);
 
-            // untuk UPDATE, harus baca data lama terlebih dahulu (BeforeImage)
-            var retrieval = new DataRetrieval(tableName, new[] { "*" });
-            var beforeRows = _storageManager.ReadBlock(retrieval).ToList();
+            // At this point I don't care about making beautiful code anymore
+            // I'm just gonna do what works (compiles)
 
-            var data = new Dictionary<string, object>
+            Condition? condition = null;
+
+            if (parsedQuery.WhereClause is not null)
             {
-                ["example_col"] = "value"
-            };
+                var operations = new Dictionary<string, Condition.Operation>()
+                {
+                    ["<"] = Condition.Operation.LT,
+                    [">"] = Condition.Operation.GT,
+                    ["="] = Condition.Operation.EQ,
+                    ["!="] = Condition.Operation.NEQ,
+                    ["<>"] = Condition.Operation.NEQ,
+                    [">="] = Condition.Operation.GEQ,
+                    ["<="] = Condition.Operation.LEQ,
+                };
 
-            var write = new DataWrite(tableName, data);
-            var affected = _storageManager.WriteBlock(write);
+                foreach ((string opchar, var operation) in operations)
+                {
+                    string[] operands = parsedQuery.WhereClause.Split(opchar, 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 
-            // serialize before dan after image
-            string? beforeImage = beforeRows.Any() ? SerializeRowData(beforeRows.First()) : null;
-            string afterImage = SerializeData(data);
+                    if (operands.Length < 2) continue;
+
+                    foreach (string operand in operands)
+                    {
+                        if (!operand.All(c => char.IsAsciiLetterOrDigit(c) || c == '.' || c == '_'))
+                        {
+                            return new();
+                        }
+                    }
+
+                    condition = new()
+                    {
+                        lhs = operands[0],
+                        rhs = operands[1],
+                        opr = operation
+                    };
+
+                    break;
+                }
+            }
+
+            Dictionary<string, object> newValues = new();
+            foreach ((var key, var val) in parsedQuery.UpdateOperations)
+            {
+                if (int.TryParse(val, out int intval))
+                {
+                    newValues.Add(key, intval);
+                }
+                else if (float.TryParse(val, out float floatval))
+                {
+                    newValues.Add(key, floatval);
+                }
+                else
+                {
+                    newValues.Add(key, val);
+                }
+            }
+
+            // Wtf is serialize data doing????
+            // Why are we only serializing the first rows to log????
+            // Why are there 2 functions????
+
+            DataRetrieval readRequest = new DataRetrieval(parsedQuery.Table, [], condition);
+            var beforeImage = SerializeRowData(_storageManager.ReadBlock(readRequest).ToList().First());
+
+            DataWrite writeRequest = new(parsedQuery.Table, newValues, condition);
+            int affectedRowCount = _storageManager.WriteBlock(writeRequest);
+            var afterImage = SerializeData(_storageManager.ReadBlock(readRequest).ToList().First().Columns);
 
             return new ExecutionResult()
             {
                 Query = query,
                 Success = true,
-                Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager.",
+                Message = $"{affectedRowCount} row(s) ditulis/diperbarui melalui Storage Manager.",
                 TransactionId = transactionId,
-                TableName = tableName,
+                TableName = parsedQuery.Table,
                 BeforeImage = beforeImage,
                 AfterImage = afterImage,
                 RowIdentifier = "UNKNOWN"
