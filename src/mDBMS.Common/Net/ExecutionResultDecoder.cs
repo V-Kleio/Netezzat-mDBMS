@@ -6,10 +6,10 @@ namespace mDBMS.Common.Net;
 
 public class ExecutionResultDecoder
 {
-    public ExecutionResult Decode(byte[] data)
+    public ExecutionResult Decode(byte[] data, int lowerbound, int upperbound)
     {
         var result = new ExecutionResult();
-        using (var memoryStream = new MemoryStream(data))
+        using (var memoryStream = new MemoryStream(data, lowerbound, upperbound - lowerbound, false))
         using (var reader = new BinaryReader(memoryStream, Encoding.UTF8))
         {
             result.Success = reader.ReadBoolean();

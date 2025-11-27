@@ -38,46 +38,39 @@ class Server
         ExecutionResultEncoder resultEncoder = new ExecutionResultEncoder();
 
         IPEndPoint endpoint = new(IPAddress.Loopback, port);
-        TcpListener listener = new(endpoint);
 
-        try
+        using (TcpListener listener = new(endpoint))
         {
             listener.Start();
             Console.WriteLine($"Server listening on {endpoint}");
 
             while (true)
             {
-                using TcpClient handler = listener.AcceptTcpClient();
-                using NetworkStream stream = handler.GetStream();
-    
-                byte[] buffer = new byte[4096];
-                int length = stream.Read(buffer, 0, buffer.Length);
-
                 try
                 {
-                    var (query, transactionId) = queryDecoder.Decode(buffer, length);
-
-                    Console.WriteLine($"Received query: {query} with transaction ID: {transactionId}");
-
-                    ExecutionResult result = qp.ExecuteQuery(query, transactionId);
-
-                    byte[] response = resultEncoder.Encode(result);
-
-                    stream.Write(response, 0, response.Length);
+                    using (TcpClient handler = listener.AcceptTcpClient())
+                    {
+                        handler.ReceiveTimeout = 1000;
+                        using (NetworkStream stream = handler.GetStream())
+                        {
+                            byte[] buffer = new byte[4096];
+                            int length = stream.Read(buffer, 0, buffer.Length);
+        
+                            var (query, transactionId) = queryDecoder.Decode(buffer, 0, length);
+                            Console.WriteLine($"Received query: {query} with transaction ID: {transactionId}");
+        
+                            ExecutionResult result = qp.ExecuteQuery(query, transactionId);
+                            byte[] response = resultEncoder.Encode(result);
+        
+                            stream.Write(response, 0, response.Length);
+                        }
+                    }
                 }
                 catch (ArgumentException)
                 {
                     // Send error back to client if I dont't forget
                 }
-                finally
-                {
-                    handler.Close();
-                }
             }
-        }
-        finally
-        {
-            listener.Stop();
         }
     }
 }

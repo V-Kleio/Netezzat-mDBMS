@@ -8,14 +8,16 @@ namespace mDBMS.Common.Net
         private static readonly byte[] MagicBytes = Encoding.UTF8.GetBytes("mDBMS");
         private static readonly int MetadataSize = MagicBytes.Length + sizeof(int);
 
-        public (string query, int transactionId) Decode(byte[] data, int length)
+        public (string query, int transactionId) Decode(byte[] data, int lowerbound, int upperbound)
         {
+            int length = upperbound - lowerbound;
+
             if (length < MetadataSize)
             {
                 throw new ArgumentException("Data is too short to be a valid query.");
             }
 
-            var span = new Span<byte>(data, 0, length);
+            var span = new Span<byte>(data, lowerbound, length);
 
             if (!span.StartsWith(MagicBytes))
             {

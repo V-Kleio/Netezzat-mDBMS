@@ -43,7 +43,7 @@ class ProcessorProxy : IQueryProcessor
 
             try
             {
-                result = decoder.Decode(buffer);
+                result = decoder.Decode(buffer, 0, length);
             }
             catch (Exception e)
             {
