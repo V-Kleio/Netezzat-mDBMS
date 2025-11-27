@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.Transaction;
 
@@ -24,10 +25,10 @@ public class Lock
 
     public Lock(int transactionId, LockType type, DatabaseObject obj)
     {
-        TransactionId = transactionId;
-        Type = type;
-        DatabaseObject = obj;
-        AcquiredAt = DateTime.UtcNow;
+        this.TransactionId = transactionId;
+        this.Type = type;
+        this.DatabaseObject = obj;
+        this.AcquiredAt = DateTime.UtcNow;
     }
 }
 
@@ -40,11 +41,11 @@ public class TransactionState
     public TransactionStatus Status { get; set; }
     public bool InGrowingPhase { get; set; } = true; // true = growing phase, false = shrinking phase
     public HashSet<string> HeldLocks { get; set; } = new(); // daftar object keys yang di-lock
-    
+
     public HashSet<int> WaitingFor { get; set; } = new(); // menyimpan ID transaksi yang sedang ditunggu oleh transaksi ini
-    
+
     public DateTime StartedAt { get; set; }
-    
+
 
     public TransactionState(int transactionId)
     {
@@ -60,8 +61,11 @@ public class TransactionState
 public class ConcurrencyControlManager : IConcurrencyControlManager
 {
     private readonly IConcurrencyControlManager _protocolManager;
-    private readonly ConcurrencyProtocol _protocol;
-    
+    private readonly ConcurrencyProtocol _protocol;private readonly ConcurrentDictionary<int, TransactionState> _transactions;
+    private readonly object _lockObject = new();
+    private readonly ConcurrentDictionary<string, List<Lock>> _lockTable;
+    private readonly ConcurrentDictionary<int, List<(DatabaseObject obj, DateTime accessedAt)>> _objectAccessLog;
+
     /// <summary>
     /// Konstruktor dengan pemilihan protocol
     /// </summary>
@@ -70,28 +74,28 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         _transactions = new ConcurrentDictionary<int, TransactionState>();
         _lockTable = new ConcurrentDictionary<string, List<Lock>>();
-        Console.WriteLine("[CCM] ConcurrencyControlManager initialized with Two-Phase Locking Protocol");
-    }   
+        _objectAccessLog = new ConcurrentDictionary<int, List<(DatabaseObject, DateTime)>>();
+        // Console.WriteLine("[CCM] ConcurrencyControlManager initialized with Two-Phase Locking Protocol");
 
-        _protocol = protocol;
-        
+        // _protocol = protocol;
+
         // Factory pattern: buat manager sesuai protocol yang dipilih
         _protocolManager = protocol switch
         {
-            ConcurrencyProtocol.TwoPhaseeLocking => new TwoPhaseeLockingManager(),
+            // ConcurrencyProtocol.TwoPhaseeLocking => new TwoPhaseeLockingManager(),
             ConcurrencyProtocol.TimestampOrdering => new TimestampOrderingManager(),
             ConcurrencyProtocol.OptimisticValidation => new OptimisticConcurrencyManager(),
             _ => throw new ArgumentException($"Unknown protocol: {protocol}")
         };
-        
+
         Console.WriteLine($"[CCM] ConcurrencyControlManager initialized with protocol: {protocol}");
     }
-    
+
     /// <summary>
     /// Get current protocol being used
     /// </summary>
     public ConcurrencyProtocol GetProtocol() => _protocol;
-    
+
     /// <summary>
     /// Memulai transaksi baru
     /// </summary>
@@ -99,7 +103,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         return _protocolManager.BeginTransaction();
     }
-    
+
     /// <summary>
     /// Memvalidasi apakah aksi pada objek diizinkan
     /// </summary>
@@ -130,9 +134,9 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
 
         // Meminta lock
         var response = AcquireLock(action.TransactionId,action.DatabaseObject,requiredLockType,action.Type);
-       
+
         // Status transaksi diperbarui
-        lock (_lockObject)  
+        lock (_lockObject)
         {
             if (response.Status == Response.ResponseStatus.Waiting)
             {
@@ -153,7 +157,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
 
         return response;
     }
-        
+
 
     /// <summary>
     /// Mengakhiri transaksi (commit atau abort)
@@ -178,11 +182,11 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
             }
 
             txnState.Status = commit
-            ? TransactionStatus.Committing
-            : TransactionStatus.Aborting;
-        
+            ? TransactionStatus.Committed
+            : TransactionStatus.Aborted;
+
             Console.WriteLine($"[CCM] Transaction T{transactionId} status: {txnState.Status}");
-            
+
             // Masuk ke shrinking phase, tidak boleh acquire lock lagi
             txnState.InGrowingPhase = false;
         }
@@ -201,7 +205,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
         Console.WriteLine($"[CCM] Transaction T{transactionId} {(commit ? "COMMITTED" : "ABORTED")} - All locks released");
         return true;
     }
-    
+
     /// <summary>
     /// Abort transaksi
     /// </summary>
@@ -209,7 +213,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         return _protocolManager.AbortTransaction(transactionId);
     }
-    
+
     /// <summary>
     /// Commit transaksi
     /// </summary>
@@ -217,7 +221,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         return _protocolManager.CommitTransaction(transactionId);
     }
-    
+
     /// <summary>
     /// Mendapatkan status transaksi
     /// </summary>
@@ -225,7 +229,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         return _protocolManager.GetTransactionStatus(transactionId);
     }
-    
+
     /// <summary>
     /// Memeriksa apakah transaksi aktif
     /// </summary>
@@ -261,10 +265,10 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
         {
             // Dapatkan atau buat lock list untuk object
             var locks = _lockTable.GetOrAdd(objectKey, _ => new List<Lock>());
-            
+
             // Cek apakah transaksi sudah punya lock pada object
             var existingLock = locks.FirstOrDefault(l => l.TransactionId == transactionId);
-            
+
             if (existingLock != null)
             {
                 // Lock upgrade
@@ -301,7 +305,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
             else
             {
                 // LOGIKA DEADLOCK DETECTION
-                
+
                 // Cari transaksi yang memegang lock yang menyebabkan konflik
                 // (Abaikan lock milik diri sendiri kalau ada multiple locks)
                 var conflictingTxns = locks
@@ -318,7 +322,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
                     {
                         // Terdeteksi Deadlock
                         Console.WriteLine($"[CCM] DEADLOCK DETECTED: T{transactionId} waiting for T{holderId} creates a cycle.");
-                        
+
                         // ABORT Transaksi tsb
                         AbortTransaction(transactionId);
 
@@ -356,7 +360,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
 
         // Filter locks dari transaksi lain (ignore locks dari transaksi sendiri)
         var otherLocks = existingLocks.Where(l => l.TransactionId != transactionId).ToList();
-        
+
         if (otherLocks.Count == 0)
             return true;
 
@@ -388,7 +392,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
                 if (_lockTable.TryGetValue(objectKey, out var locks))
                 {
                     locks.RemoveAll(l => l.TransactionId == transactionId);
-                    
+
                     // Hapus entry jika tidak ada lock lagi
                     if (locks.Count == 0)
                     {
@@ -398,7 +402,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
             }
 
             txnState.HeldLocks.Clear();
-            
+
             Console.WriteLine($"[CCM] Released {lockCount} lock(s) for T{transactionId}");
         }
     }
@@ -411,7 +415,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         var visited = new HashSet<int>();
         var stack = new Stack<int>();
-        
+
         // Mulai penelusuran dari target (orang yang kita tunggu).
         // Jika dari target bisa kembali ke startTxnId, berarti ada siklus.
         stack.Push(targetTxnId);
@@ -441,6 +445,17 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
         }
 
         return false;
+    }
+
+
+    public void LogObject(DatabaseObject obj, int transactionId)
+    {
+        var log = _objectAccessLog.GetOrAdd(transactionId, _ => new List<(DatabaseObject, DateTime)>());
+        lock (log)
+        {
+            log.Add((obj, DateTime.UtcNow));
+        }
+        Console.WriteLine($"[2PL] Logged object access: T{transactionId} accessed {obj.ToQualifiedString()}");
     }
 
 }
