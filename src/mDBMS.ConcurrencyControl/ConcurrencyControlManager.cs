@@ -41,7 +41,11 @@ public class TransactionState
     public TransactionStatus Status { get; set; }
     public bool InGrowingPhase { get; set; } = true; // true = growing phase, false = shrinking phase
     public HashSet<string> HeldLocks { get; set; } = new(); // daftar object keys yang di-lock
+    
+    public HashSet<int> WaitingFor { get; set; } = new(); // menyimpan ID transaksi yang sedang ditunggu oleh transaksi ini
+    
     public DateTime StartedAt { get; set; }
+    
 
     public TransactionState(int transactionId)
     {
@@ -70,7 +74,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
         _transactions = new ConcurrentDictionary<int, TransactionState>();
         _lockTable = new ConcurrentDictionary<string, List<Lock>>();
         Console.WriteLine("[CCM] ConcurrencyControlManager initialized with Two-Phase Locking Protocol");
-    }
+    }   
 
     /// <summary>
     /// Memulai transaksi baru
@@ -243,13 +247,48 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
             }
             else
             {
-                // Lock conflict --> transaction wait
-                var conflictingTxns = locks.Select(l => l.TransactionId).Where(tid => tid != transactionId).ToHashSet();
+                // LOGIKA DEADLOCK DETECTION
                 
-                Console.WriteLine($"[CCM] WAIT: T{transactionId} waiting for {lockType} lock on {objectKey}");
-                Console.WriteLine($"[CCM]       Held by: T{string.Join(", T", conflictingTxns)}");
-                
-                return Response.CreateWaiting(transactionId, $"Lock conflict - waiting for other transactions", obj, actionType);
+                // Cari transaksi yang memegang lock yang menyebabkan konflik
+                // (Abaikan lock milik diri sendiri kalau ada multiple locks)
+                var conflictingTxns = locks
+                    .Where(l => l.TransactionId != transactionId)
+                    .Select(l => l.TransactionId)
+                    .Distinct()
+                    .ToList();
+
+                // 2. Cek Deadlock untuk setiap transaksi yang menyebabkan konflik
+                foreach (var holderId in conflictingTxns)
+                {
+                    // Gunakan fungsi deadlock
+                    if (DetectDeadlock(transactionId, holderId))
+                    {
+                        // Terdeteksi Deadlock
+                        Console.WriteLine($"[CCM] DEADLOCK DETECTED: T{transactionId} waiting for T{holderId} creates a cycle.");
+                        
+                        // ABORT Transaksi tsb
+                        AbortTransaction(transactionId);
+
+                        return new Response
+                        {
+                            Allowed = false,
+                            TransactionId = transactionId,
+                            DatabaseObject = obj,
+                            ActionType = actionType,
+                            Status = Response.ResponseStatus.Deadlock,
+                            Reason = $"Deadlock detected with T{holderId}"
+                        };
+                    }
+                }
+
+                // 3. Jika tidak deadlock, catat bahwa kita menunggu mereka (Update Wait-For Graph)
+                foreach (var holderId in conflictingTxns)
+                {
+                    txnState.WaitingFor.Add(holderId);
+                }
+
+                Console.WriteLine($"[CCM] WAIT: T{transactionId} waiting for {lockType} lock on {objectKey}. Holders: {string.Join(",", conflictingTxns)}");
+                return Response.CreateWaiting(transactionId, $"Lock conflict - waiting for T{string.Join(",", conflictingTxns)}", obj, actionType);
             }
         }
     }
@@ -310,4 +349,45 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
             Console.WriteLine($"[CCM] Released {lockCount} lock(s) for T{transactionId}");
         }
     }
+
+    /// <summary>
+    /// Mendeteksi deadlock menggunakan DFS pada Wait-For Graph.
+    /// Cek apakah penambahan edge dari 'startTxnId' ke 'targetTxnId' akan membuat siklus.
+    /// </summary>
+    private bool DetectDeadlock(int startTxnId, int targetTxnId)
+    {
+        var visited = new HashSet<int>();
+        var stack = new Stack<int>();
+        
+        // Mulai penelusuran dari target (orang yang kita tunggu).
+        // Jika dari target bisa kembali ke startTxnId, berarti ada siklus.
+        stack.Push(targetTxnId);
+
+        while (stack.Count > 0)
+        {
+            var currentId = stack.Pop();
+
+            if (currentId == startTxnId)
+            {
+                return true; // *Siklus ditemukan*: start -> ... -> target -> ... -> start
+            }
+
+            if (!visited.Contains(currentId))
+            {
+                visited.Add(currentId);
+
+                if (_transactions.TryGetValue(currentId, out var currentState))
+                {
+                    // Semua transaksi yang sedang ditunggu currentId dimasukkan
+                    foreach (var waitingId in currentState.WaitingFor)
+                    {
+                        stack.Push(waitingId);
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
 }
