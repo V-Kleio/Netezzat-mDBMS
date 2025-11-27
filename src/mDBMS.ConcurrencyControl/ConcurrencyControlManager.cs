@@ -93,28 +93,55 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     /// </summary>
     public Response ValidateObject(Common.Transaction.Action action)
     {
-        Console.WriteLine($"[CCM] ValidateObject - T{action.TransactionId}: {action.Type} on {action.DatabaseObject.ToQualifiedString()}");
+        Console.WriteLine(
+            $"[CCM] ValidateObject - T{action.TransactionId}: {action.Type} on {action.DatabaseObject.ToQualifiedString()}");
 
+        // Cek apakah transaksi ada
         if (!_transactions.TryGetValue(action.TransactionId, out var txnState))
         {
             Console.WriteLine($"[CCM] ERROR: Transaction T{action.TransactionId} not found");
             return Response.CreateDenied(action.TransactionId, "Transaction not found", action.DatabaseObject, action.Type);
         }
 
-        if (txnState.Status != TransactionStatus.Active)
+        // Transaksi yang sudah selesai tidak boleh minta lock lagi, harus active atau waiting
+        if (txnState.Status != TransactionStatus.Active && txnState.Status != TransactionStatus.Waiting)
         {
-            Console.WriteLine($"[CCM] ERROR: Transaction T{action.TransactionId} is not active (Status: {txnState.Status})");
+            Console.WriteLine($"[CCM] ERROR: Transaction T{action.TransactionId} is {txnState.Status}");
             return Response.CreateDenied(action.TransactionId, $"Transaction is {txnState.Status}", action.DatabaseObject, action.Type);
         }
 
         // Tipe lock yang dibutuhkan berdasarkan action type
-        LockType requiredLockType = action.Type == Common.Transaction.Action.ActionType.Read 
-            ? LockType.Shared 
+        var requiredLockType =
+        action.Type == Common.Transaction.Action.ActionType.Read
+            ? LockType.Shared
             : LockType.Exclusive;
 
-        // Acquire lock
-        return AcquireLock(action.TransactionId, action.DatabaseObject, requiredLockType, action.Type);
+        // Meminta lock
+        var response = AcquireLock(action.TransactionId,action.DatabaseObject,requiredLockType,action.Type);
+       
+        // Status transaksi diperbarui
+        lock (_lockObject)  
+        {
+            if (response.Status == Response.ResponseStatus.Waiting)
+            {
+                // Transaksi harus menunggu karena ada konflik lock
+                txnState.Status = TransactionStatus.Waiting;
+                Console.WriteLine($"[CCM] Transaction T{action.TransactionId} now waiting for lock");
+            }
+            else if (response.Status == Response.ResponseStatus.Granted)
+            {
+                // Lock diberikan dan status di update
+                if (txnState.Status == TransactionStatus.Waiting)
+                {
+                    txnState.Status = TransactionStatus.Active;
+                    Console.WriteLine($"[CCM] Transaction T{action.TransactionId} back to execution");
+                }
+            }
+        }
+
+        return response;
     }
+        
 
     /// <summary>
     /// Mengakhiri transaksi (commit atau abort)
@@ -122,20 +149,42 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     public bool EndTransaction(int transactionId, bool commit)
     {
         Console.WriteLine($"[CCM] EndTransaction - T{transactionId} ({(commit ? "COMMIT" : "ABORT")})");
-
+        // Cek apakah transaksi ada
         if (!_transactions.TryGetValue(transactionId, out var txnState))
         {
             Console.WriteLine($"[CCM] ERROR: Transaction T{transactionId} not found");
             return false;
         }
 
-        // Masuk ke shrinking phase dan release semua locks
-        txnState.InGrowingPhase = false;
+        lock (_lockObject)
+        {
+            if (txnState.Status == TransactionStatus.Committed || // Mencegah transaksi yang sudah selesai diakhiri lagi
+            txnState.Status == TransactionStatus.Aborted)
+            {
+                Console.WriteLine($"[CCM] WARNING: Transaction T{transactionId} already finished with status {txnState.Status}");
+                return false;
+            }
+
+            txnState.Status = commit
+            ? TransactionStatus.Committing
+            : TransactionStatus.Aborting;
+        
+            Console.WriteLine($"[CCM] Transaction T{transactionId} status: {txnState.Status}");
+            
+            // Masuk ke shrinking phase, tidak boleh acquire lock lagi
+            txnState.InGrowingPhase = false;
+        }
+
+        // Release semua locks yang dipegang transaksi
         ReleaseAllLocks(transactionId);
 
-        // Update status transaksi
-        var newStatus = commit ? TransactionStatus.Committed : TransactionStatus.Aborted;
-        txnState.Status = newStatus;
+        // Set status akhir transaksi
+        lock (_lockObject)
+        {
+            txnState.Status = commit
+                ? TransactionStatus.Committed
+                : TransactionStatus.Aborted;
+        }
 
         Console.WriteLine($"[CCM] Transaction T{transactionId} {(commit ? "COMMITTED" : "ABORTED")} - All locks released");
         return true;
