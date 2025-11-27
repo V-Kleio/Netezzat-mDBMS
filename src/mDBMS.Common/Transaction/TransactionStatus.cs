@@ -11,9 +11,9 @@ public enum TransactionStatus
     Active,
 
     /// <summary>
-    /// Transaksi sedang dalam proses commit
+    /// Transaksi telah menyelesaikan eksekusi terakhir tetapi belum commit
     /// </summary>
-    Committing,
+    PartiallyCommitted,
 
     /// <summary>
     /// Transaksi telah berhasil di-commit
@@ -21,9 +21,9 @@ public enum TransactionStatus
     Committed,
 
     /// <summary>
-    /// Transaksi sedang dalam proses abort
+    /// Transaksi gagal dan harus di-abort
     /// </summary>
-    Aborting,
+    Failed,
 
     /// <summary>
     /// Transaksi telah di-abort
@@ -31,12 +31,12 @@ public enum TransactionStatus
     Aborted,
 
     /// <summary>
-    /// Transaksi dalam keadaan waiting (menunggu lock)
+    /// Transaksi telah selesai (baik committed maupun aborted) dan sumber daya telah dibebaskan
     /// </summary>
-    Waiting,
+    Terminated,
 
     /// <summary>
-    /// Transaksi mengalami deadlock
+    /// Transaksi dalam keadaan waiting (menunggu lock) - Internal State
     /// </summary>
-    Deadlocked
+    Waiting
 }
