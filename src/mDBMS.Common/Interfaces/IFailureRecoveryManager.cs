@@ -7,6 +7,7 @@ namespace mDBMS.Common.Interfaces
 {
     public interface IFailureRecoveryManager
 	{
+		//ExecutionResult blom ada classnya, bukan kita yang implement bikin dummy aja klao mo test , tanya klompok CCM
 		void WriteLog(ExecutionResult info);
 
 		void SaveCheckpoint();
@@ -14,7 +15,7 @@ namespace mDBMS.Common.Interfaces
 		//RecoverCriteria udah ada di mDBMS.Common/DTOs
         void Recover(RecoverCriteria criteria);
 
-        // Undo transaction buat yang abort recovery
-        bool UndoTransaction(int transactionId);
+		bool UndoTransaction(int transactionId);
+
     }
 }
