@@ -125,30 +125,65 @@ namespace mDBMS.StorageManager
             TableSchema? schema = GetSchemaFromFile(fileName);
             if (schema == null) return 0;
 
-            // Buat object Row baru
+            // 1. Siapkan Data Row Baru
             Row rowObj = new Row(); 
             foreach(var kvp in dataWrite.NewValues) rowObj[kvp.Key] = kvp.Value;
-            
-            // Serialize Row menjadi byte array
             byte[] rowData = RowSerializer.SerializeRow(schema, rowObj);
-            
-            // TODO (Milestone 3): Logic untuk mencari Free Space di blok yang ada (Bitmap/FreeList).
-            // Untuk Milestone 2: Append Only dulu (Selalu buat blok baru/tambah di akhir).
-            
-            long newBlockOffset;
-            using (var fs = new FileStream(fullPath, FileMode.Append, FileAccess.Write))
+            int rowSize = rowData.Length;
+
+            long targetBlockOffset = -1;
+            bool spaceFound = false;
+
+            // 2. First fit (Cari blok yang muat)
+            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.ReadWrite))
             {
-                newBlockOffset = fs.Position; 
-                // Buat blok baru hanya dengan 1 baris
-                var rawRows = new List<byte[]> { rowData };
-                byte[] blockData = BlockSerializer.CreateBlock(rawRows);
-                fs.Write(blockData, 0, blockData.Length);
+                if (fs.Length > FileHeaderSize)
+                {
+                    fs.Seek(FileHeaderSize, SeekOrigin.Begin);
+                    byte[] buffer = new byte[BlockSize];
+                    long currentOffset = FileHeaderSize;
+
+                    while (fs.Read(buffer, 0, BlockSize) > 0)
+                    {
+                        // Cek apakah muat? (Butuh RowSize + 2 byte pointer)
+                        int freeSpace = BlockSerializer.GetFreeSpace(buffer, rowSize);
+                        
+                        if (freeSpace >= rowSize + 2)
+                        {
+                            // Sisipkan di sini jika muat
+                            if (BlockSerializer.TryInsertRow(schema, buffer, rowData))
+                            {
+                                // Mundur ke awal blok ini untuk menimpa
+                                fs.Seek(currentOffset, SeekOrigin.Begin);
+                                fs.Write(buffer, 0, BlockSize);
+                                
+                                targetBlockOffset = currentOffset;
+                                spaceFound = true;
+                                break; 
+                            }
+                        }
+                        currentOffset += BlockSize;
+                    }
+                }
+
+                // 3. Jika tidak ada yang muat -> Append baru
+                if (!spaceFound)
+                {
+                    // Pindah ke paling ujung file
+                    fs.Seek(0, SeekOrigin.End);
+                    targetBlockOffset = fs.Position;
+
+                    // Buat blok baru
+                    var rawRows = new List<byte[]> { rowData };
+                    byte[] newBlock = BlockSerializer.CreateBlock(rawRows);
+                    fs.Write(newBlock, 0, newBlock.Length);
+                }
             }
 
-            // Update Index jika ada
-            UpdateIndexes(tableName, rowObj, newBlockOffset);
+            // 4. Update Index karena offset dinamis
+            UpdateIndexes(tableName, rowObj, targetBlockOffset);
 
-            return 1; // Return 1 baris affected
+            return 1;
         }
 
         // SetIndex
