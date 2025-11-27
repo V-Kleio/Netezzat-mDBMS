@@ -104,5 +104,51 @@ namespace mDBMS.StorageManager
             }
             return size;
         }
+
+        // Menghitung sisa ruang kosong dalam blok tanpa deserialize full
+        public static int GetFreeSpace(byte[] blockData, int rowSize)
+        {
+            // Header Blok (2 bytes) = Jumlah Record (N)
+            ushort recordCount = BitConverter.ToUInt16(blockData, 0);
+
+            // Rumus Penggunaan Memori:
+            // 4 bytes (Block Header) + (N * RowSize) + (N * 2 bytes Directory Pointer)
+            int usedSpace = 4 + (recordCount * rowSize) + (recordCount * 2);
+            
+            return BlockSize - usedSpace;
+        }
+
+        // Menyisipkan Row (byte[]) ke dalam blok yang sudah ada
+        public static bool TryInsertRow(TableSchema schema, byte[] blockData, byte[] newRowData)
+        {
+            int rowSize = newRowData.Length;
+            int freeSpace = GetFreeSpace(blockData, rowSize);
+
+            // Butuh space untuk Data + 2 byte Directory Pointer
+            if (freeSpace < rowSize + 2) return false;
+
+            // Karena struktur Slotted Page itu rumit untuk diinsert langsung secara byte manipulation,
+            // Cara teraman: Deserialize -> Add -> Serialize ulang.
+            
+            var rows = DeserializeBlock(schema, blockData);
+            
+            // Konversi byte[] row balik ke Object Row, kemudian rebuild block
+            Row rowObj = RowSerializer.DeserializeRow(schema, newRowData);
+            rows.Add(rowObj);
+            byte[] newBlockBytes = CreateBlock(serializeRows(schema, rows));
+            
+            // Salin hasil rebuild ke buffer asli
+            Buffer.BlockCopy(newBlockBytes, 0, blockData, 0, BlockSize);
+            
+            return true;
+        }
+
+        // Helper private untuk membungkus ulang row jadi list byte[]
+        private static List<byte[]> serializeRows(TableSchema schema, List<Row> rows)
+        {
+            var list = new List<byte[]>();
+            foreach (var r in rows) list.Add(RowSerializer.SerializeRow(schema, r));
+            return list;
+        }
     }
 }
