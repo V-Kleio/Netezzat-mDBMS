@@ -8,6 +8,7 @@ internal enum SqlTokenType
     // Keywords
     SELECT, FROM, WHERE, JOIN, INNER, LEFT, RIGHT, FULL, ON,
     GROUP, BY, ORDER, ASC, DESC, AND, OR,
+    UPDATE, SET, INTO, VALUES,
 
     // Symbols
     COMMA, DOT, STAR, OPEN_PAREN, CLOSE_PAREN,
@@ -176,6 +177,10 @@ internal sealed class SqlLexer
             "DESC"   => new SqlToken(SqlTokenType.DESC, ident),
             "AND"    => new SqlToken(SqlTokenType.AND, ident),
             "OR"     => new SqlToken(SqlTokenType.OR, ident),
+            "UPDATE" => new SqlToken(SqlTokenType.UPDATE, ident),
+            "SET"    => new SqlToken(SqlTokenType.SET, ident),
+            "INTO"   => new SqlToken(SqlTokenType.INTO, ident),
+            "VALUES" => new SqlToken(SqlTokenType.VALUES, ident),
             _         => new SqlToken(SqlTokenType.IDENTIFIER, ident)
         };
     }

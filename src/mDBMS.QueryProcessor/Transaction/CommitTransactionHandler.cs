@@ -5,18 +5,18 @@ namespace mDBMS.QueryProcessor.Transaction
 {
     internal class CommitTransactionHandler : IQueryHandler
     {
-        private readonly QueryProcessor _processor;
         private readonly IConcurrencyControlManager _concurrencyControlManager;
+        private readonly IFailureRecoveryManager _failureRecoveryManager; 
 
-        public CommitTransactionHandler(QueryProcessor processor, IConcurrencyControlManager concurrencyControlManager)
+        public CommitTransactionHandler(IConcurrencyControlManager concurrencyControlManager, IFailureRecoveryManager failureRecoveryManager) 
         {
-            _processor = processor;
             _concurrencyControlManager = concurrencyControlManager;
+            _failureRecoveryManager = failureRecoveryManager; 
         }
 
-        public ExecutionResult HandleQuery(string query)
+        public ExecutionResult HandleQuery(string query, int transactionId)
         {
-            if (!_processor.ActiveTransactionId.HasValue)
+            if (transactionId == -1) 
             {
                 return new ExecutionResult()
                 {
@@ -27,15 +27,18 @@ namespace mDBMS.QueryProcessor.Transaction
                 };
             }
 
-            var transactionId = _processor.ActiveTransactionId.Value;
+            // 1. Panggil CCM untuk me-release lock dan ganti status
             _concurrencyControlManager.EndTransaction(transactionId, true);
-            _processor.ActiveTransactionId = null;
+
+            // Kita berasumsi WriteLog untuk COMMIT sudah dipanggil di QueryProcessor.cs.
+
             return new ExecutionResult()
             {
                 Query = query,
                 Success = true,
                 Message = $"Transaksi {transactionId} berhasil di-COMMIT.",
-                TransactionId = transactionId
+                TransactionId = transactionId,
+                TableName = "COMMIT" 
             };
         }
     }

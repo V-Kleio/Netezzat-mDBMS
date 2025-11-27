@@ -125,30 +125,65 @@ namespace mDBMS.StorageManager
             TableSchema? schema = GetSchemaFromFile(fileName);
             if (schema == null) return 0;
 
-            // Buat object Row baru
+            // 1. Siapkan Data Row Baru
             Row rowObj = new Row(); 
             foreach(var kvp in dataWrite.NewValues) rowObj[kvp.Key] = kvp.Value;
-            
-            // Serialize Row menjadi byte array
             byte[] rowData = RowSerializer.SerializeRow(schema, rowObj);
-            
-            // TODO (Milestone 3): Logic untuk mencari Free Space di blok yang ada (Bitmap/FreeList).
-            // Untuk Milestone 2: Append Only dulu (Selalu buat blok baru/tambah di akhir).
-            
-            long newBlockOffset;
-            using (var fs = new FileStream(fullPath, FileMode.Append, FileAccess.Write))
+            int rowSize = rowData.Length;
+
+            long targetBlockOffset = -1;
+            bool spaceFound = false;
+
+            // 2. First fit (Cari blok yang muat)
+            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.ReadWrite))
             {
-                newBlockOffset = fs.Position; 
-                // Buat blok baru hanya dengan 1 baris
-                var rawRows = new List<byte[]> { rowData };
-                byte[] blockData = BlockSerializer.CreateBlock(rawRows);
-                fs.Write(blockData, 0, blockData.Length);
+                if (fs.Length > FileHeaderSize)
+                {
+                    fs.Seek(FileHeaderSize, SeekOrigin.Begin);
+                    byte[] buffer = new byte[BlockSize];
+                    long currentOffset = FileHeaderSize;
+
+                    while (fs.Read(buffer, 0, BlockSize) > 0)
+                    {
+                        // Cek apakah muat? (Butuh RowSize + 2 byte pointer)
+                        int freeSpace = BlockSerializer.GetFreeSpace(buffer, rowSize);
+                        
+                        if (freeSpace >= rowSize + 2)
+                        {
+                            // Sisipkan di sini jika muat
+                            if (BlockSerializer.TryInsertRow(schema, buffer, rowData))
+                            {
+                                // Mundur ke awal blok ini untuk menimpa
+                                fs.Seek(currentOffset, SeekOrigin.Begin);
+                                fs.Write(buffer, 0, BlockSize);
+                                
+                                targetBlockOffset = currentOffset;
+                                spaceFound = true;
+                                break; 
+                            }
+                        }
+                        currentOffset += BlockSize;
+                    }
+                }
+
+                // 3. Jika tidak ada yang muat -> Append baru
+                if (!spaceFound)
+                {
+                    // Pindah ke paling ujung file
+                    fs.Seek(0, SeekOrigin.End);
+                    targetBlockOffset = fs.Position;
+
+                    // Buat blok baru
+                    var rawRows = new List<byte[]> { rowData };
+                    byte[] newBlock = BlockSerializer.CreateBlock(rawRows);
+                    fs.Write(newBlock, 0, newBlock.Length);
+                }
             }
 
-            // Update Index jika ada
-            UpdateIndexes(tableName, rowObj, newBlockOffset);
+            // 4. Update Index karena offset dinamis
+            UpdateIndexes(tableName, rowObj, targetBlockOffset);
 
-            return 1; // Return 1 baris affected
+            return 1;
         }
 
         // SetIndex
@@ -302,6 +337,115 @@ namespace mDBMS.StorageManager
             }
         }
 
-        public int DeleteBlock(DataDeletion dataDeletion) { return 0; } 
+        public int DeleteBlock(DataDeletion dataDeletion)
+        {
+            string tableName = dataDeletion.Table;
+            string fileName = $"{tableName.ToLower()}.dat";
+            string fullPath = Path.Combine(DataPath, fileName);
+
+            if (!File.Exists(fullPath)) return 0;
+
+            TableSchema? schema = GetSchemaFromFile(fileName);
+            if (schema == null) return 0;
+
+            int deletedCount = 0;
+            long fileSize = new FileInfo(fullPath).Length;
+
+            // Baca semua blok, filter row yang match kondisi, rebuild blok tanpa row tersebut
+            var allBlocks = new List<byte[]>();
+            var blockOffsets = new List<long>();
+
+            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read))
+            {
+                if (fs.Length <= FileHeaderSize) return 0;
+
+                fs.Seek(FileHeaderSize, SeekOrigin.Begin);
+                byte[] buffer = new byte[BlockSize];
+                long currentOffset = FileHeaderSize;
+
+                // Baca semua blok
+                while (fs.Read(buffer, 0, BlockSize) > 0)
+                {
+                    byte[] blockCopy = new byte[BlockSize];
+                    Buffer.BlockCopy(buffer, 0, blockCopy, 0, BlockSize);
+                    allBlocks.Add(blockCopy);
+                    blockOffsets.Add(currentOffset);
+                    currentOffset += BlockSize;
+                }
+            }
+
+            // Process setiap blok: filter out rows yang match deletion condition
+            var newBlocks = new List<byte[]>();
+
+            for (int i = 0; i < allBlocks.Count; i++)
+            {
+                var blockData = allBlocks[i];
+                var rows = BlockSerializer.DeserializeBlock(schema, blockData);
+
+                // Filter row: Keep hanya yang TIDAK match kondisi delete
+                var survivingRows = new List<Row>();
+                int deletedInThisBlock = 0;
+
+                foreach (var row in rows)
+                {
+                    if (CheckCondition(row, dataDeletion.Condition))
+                    {
+                        deletedInThisBlock++;
+                        // Hapus dari index jika ada
+                        RemoveFromIndexes(tableName, row, blockOffsets[i]);
+                    }
+                    else
+                    {
+                        survivingRows.Add(row);
+                    }
+                }
+
+                deletedCount += deletedInThisBlock;
+
+                // Rebuild blok hanya dengan surviving rows
+                if (survivingRows.Count > 0)
+                {
+                    var serializedRows = new List<byte[]>();
+                    foreach (var row in survivingRows)
+                    {
+                        serializedRows.Add(RowSerializer.SerializeRow(schema, row));
+                    }
+                    newBlocks.Add(BlockSerializer.CreateBlock(serializedRows));
+                }
+                // Jika blok kosong (semua row dihapus), jangan masukkan ke newBlocks
+            }
+
+            // Tulis ulang file dengan blok baru (tanpa blok yang kosong)
+            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Write))
+            {
+                // Preserve file header (4KB pertama)
+                fs.Seek(FileHeaderSize, SeekOrigin.Begin);
+
+                foreach (var block in newBlocks)
+                {
+                    fs.Write(block, 0, block.Length);
+                }
+
+                // Truncate file jika ada blok yang dihapus
+                fs.SetLength(FileHeaderSize + (newBlocks.Count * BlockSize));
+            }
+
+            return deletedCount;
+        }
+
+        // Helper: Remove entry dari index
+        private void RemoveFromIndexes(string table, Row row, long blockOffset)
+        {
+            foreach (var index in _activeIndexes.Values)
+            {
+                if (index.TableName.Equals(table, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (row.Columns.TryGetValue(index.ColumnName, out object? val) && val != null)
+                    {
+                        index.Remove(val, blockOffset);
+                    }
+                }
+            }
+        }
     }
 }
