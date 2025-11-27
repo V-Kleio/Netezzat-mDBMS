@@ -21,7 +21,7 @@ namespace mDBMS.QueryOptimizer
         private readonly ICostModel _costModel;
         private readonly PlanBuilder _planBuilder;
 
-        public QueryOptimizerEngine(IStorageManager storageManager)
+        public QueryOptimizerEngine(IStorageManager storageManager, QueryOptimizerOptions? options = null)
         {
             _storageManager = storageManager;
             _costModel = new SimpleCostModel();
@@ -429,6 +429,12 @@ namespace mDBMS.QueryOptimizer
             });
 
             return result;
+        }
+        private static string StripTableAlias(string column)
+        {
+            if (string.IsNullOrWhiteSpace(column)) return string.Empty;
+            var partIdx = column.IndexOf('.');
+            return partIdx >= 0 ? column.Substring(partIdx + 1) : column;
         }
         #endregion
     }
