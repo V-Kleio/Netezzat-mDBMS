@@ -61,6 +61,11 @@ namespace mDBMS.Common.Data
             if (_frames.ContainsKey(key))
             {
                 _frames[key] = page;
+                
+                // Update posisi LRU
+                _evictionQueue.Remove(key);
+                _evictionQueue.Add(key);
+                
                 return null;
             }
 
@@ -84,6 +89,29 @@ namespace mDBMS.Common.Data
         public IEnumerable<Page> GetAllPages()
         {
             return _frames.Values;
+        }
+
+        public List<Page> GetDirtyPages()
+        {
+            return _frames.Values.Where(p => p.IsDirty).ToList();
+        }
+
+
+        public void MarkClean(string tableName, int blockId)
+        {
+            var key = new BufferKey(tableName, blockId);
+            if (_frames.TryGetValue(key, out var page))
+            {
+                page.IsDirty = false;
+            }
+        }
+
+        public List<Page> FlushAll()
+        {
+            var dirtyPages = GetDirtyPages();
+            _frames.Clear();
+            _evictionQueue.Clear();
+            return dirtyPages;
         }
     }
 }
