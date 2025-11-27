@@ -1,6 +1,8 @@
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.Data;
 using mDBMS.Common.QueryData;
+using System.Text.RegularExpressions;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace mDBMS.QueryOptimizer
 {
@@ -11,11 +13,17 @@ namespace mDBMS.QueryOptimizer
     public class CostEstimator {
         private readonly IStorageManager _storageManager;
 
-        // Cost constants (dapat dituning berdasarkan kemampuan hardware)
+        // Cost constants (bisa dituning berdasarkan hardware, sementara pakai nilai default)
         private const double CPU_COST_PER_TUPLE = 0.01;
         private const double IO_COST_PER_BLOCK = 1.0;
         private const double INDEX_SEEK_COST = 2.0;
         private const double SORT_COST_MULTIPLIER = 1.5;
+
+        private static readonly Regex EqualityRegex = new(@"=\s*(?<value>'[^']*'|\d+(?:\.\d+)?|[A-Za-z_][A-Za-z0-9_]*)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex RangeRegex = new(@"(?<![<>=!])(<|>|<=|>=)", RegexOptions.Compiled);
+        private static readonly Regex BetweenRegex = new(@"\bBETWEEN\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex LikePrefixRegex = new(@"\bLIKE\s+'[^']*%'", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex InListRegex = new(@"\bIN\s*\((?<list>[^)]+)\)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         public CostEstimator(IStorageManager storageManager) {
             _storageManager = storageManager;
@@ -25,10 +33,10 @@ namespace mDBMS.QueryOptimizer
         /// Perkiraan cost untuk satu langkah eksekusi
         /// </summary>
         public double EstimateStepCost(QueryPlanStep step, Query query) {
-            // Menggunakan statistik nyata dari StorageManager
-            // Aku rapihin dikit yogs :v
+            // Memakai statistik nyata dari StorageManager
+            // Merapikan indentasi
             try {
-                var stats = _storageManager.GetStats(step.Table);
+                var stats = TryGetStatsFromSM(step.Table) ?? CreateDefaultStats(step.Table);
                 var selectivity = EstimateSelectivity(query.WhereClause ?? string.Empty, stats);
 
                 return step.Operation switch {
@@ -38,9 +46,9 @@ namespace mDBMS.QueryOptimizer
                     OperationType.FILTER           => EstimateFilterCost(stats),
                     OperationType.PROJECTION       => EstimateProjectionCost(stats),
                     OperationType.SORT             => EstimateSortCost(stats),
-                    OperationType.NESTED_LOOP_JOIN => EstimateNestedLoopJoinCost(stats),
-                    OperationType.HASH_JOIN        => EstimateHashJoinCost(stats),
-                    OperationType.MERGE_JOIN       => EstimateMergeJoinCost(stats),
+                    OperationType.NESTED_LOOP_JOIN => EstimateNestedLoopJoinCost(step),
+                    OperationType.HASH_JOIN        => EstimateHashJoinCost(step),
+                    OperationType.MERGE_JOIN       => EstimateMergeJoinCost(step),
                     _ => 100.0 // Default cost
                 };
             } catch {
@@ -120,32 +128,60 @@ namespace mDBMS.QueryOptimizer
         /// Estimate cost untuk nested loop join
         /// Complexity = O(n * m) dimana n dan m adalah size dari kedua tabel
         /// </summary>
-        private double EstimateNestedLoopJoinCost(Statistic stats) {
-            // TODO: Mendapatkan statistik dari kedua tabel yang dijoin
-            // Untuk sekarang, memakai asumsi kuadrat dari tuple count
-            double n = Math.Max(stats.TupleCount, 0);
-            return n * n * CPU_COST_PER_TUPLE;
-            // return stats.TuplCount * stats.TupleCount * CPU_COST_PER_TUPLE;
+        private double EstimateNestedLoopJoinCost(QueryPlanStep step) {
+            var (leftStats, rightStats) = ResolveJoinStats(step);
+            return EstimateNestedLoopJoinCostLeftRight(leftStats, rightStats);
+        }
+
+        private double EstimateNestedLoopJoinCostLeftRight(Statistic leftStats, Statistic rightStats) {
+            double leftBlocks = Math.Max(leftStats.BlockCount, 1);
+            double rightBlocks = Math.Max(rightStats.BlockCount, 1);
+            double leftTuples = Math.Max(leftStats.TupleCount, 0);
+            double rightTuples = Math.Max(rightStats.TupleCount, 0);
+
+            double ioCost = (leftBlocks + (leftBlocks * rightBlocks)) * IO_COST_PER_BLOCK;
+            double cpuCost = leftTuples * rightTuples * CPU_COST_PER_TUPLE;
+            return ioCost + cpuCost;
         }
 
         /// <summary>
         /// Estimate cost untuk hash join
         /// Complexity = O(n + m)
         /// </summary>
-        private double EstimateHashJoinCost(Statistic stats) {
-            double n = Math.Max(stats.TupleCount, 0);
-            return n * CPU_COST_PER_TUPLE * 2;
-            // return stats.TupleCount * CPU_COST_PER_TUPLE * 2;
+        private double EstimateHashJoinCost(QueryPlanStep step) {
+            var (leftStats, rightStats) = ResolveJoinStats(step);
+            return EstimateHashJoinCostLeftRight(leftStats, rightStats);
+        }
+
+        private double EstimateHashJoinCostLeftRight(Statistic leftStats, Statistic rightStats) {
+            double leftBlocks = Math.Max(leftStats.BlockCount, 1);
+            double rightBlocks = Math.Max(rightStats.BlockCount, 1);
+            double leftTuples = Math.Max(leftStats.TupleCount, 0);
+            double rightTuples = Math.Max(rightStats.TupleCount, 0);
+
+            double ioCost = (leftBlocks + rightBlocks) * IO_COST_PER_BLOCK;
+            double cpuCost = (leftTuples + rightTuples) * CPU_COST_PER_TUPLE * 2; // Build and probe phase
+            return ioCost + cpuCost;
         }
 
         /// <summary>
         /// Estimate cost untuk merge join
         /// Complexity = O(n + m) jika data sudah sorted
         /// </summary>
-        private double EstimateMergeJoinCost(Statistic stats) {
-            double n = Math.Max(stats.TupleCount, 0);
-            return n * CPU_COST_PER_TUPLE * 1.5;
-            // return stats.TupleCount * CPU_COST_PER_TUPLE * 1.5;
+         
+        private double EstimateMergeJoinCost(QueryPlanStep step) {
+            var (leftStats, rightStats) = ResolveJoinStats(step);
+            return EstimateMergeJoinCostLeftRight(leftStats, rightStats);
+        }
+        private double EstimateMergeJoinCostLeftRight(Statistic leftStats, Statistic rightStats) {
+            double leftBlocks = Math.Max(leftStats.BlockCount, 1);
+            double rightBlocks = Math.Max(rightStats.BlockCount, 1);
+            double leftTuples = Math.Max(leftStats.TupleCount, 0);
+            double rightTuples = Math.Max(rightStats.TupleCount, 0);
+
+            double ioCost = (leftBlocks + rightBlocks) * IO_COST_PER_BLOCK;
+            double cpuCost = (leftTuples + rightTuples) * CPU_COST_PER_TUPLE * 1.5; // Sedikit overhead untuk merge
+            return ioCost + cpuCost;
         }
 
         #endregion
@@ -154,23 +190,109 @@ namespace mDBMS.QueryOptimizer
         /// Calculate selectivity factor untuk predicate
         /// </summary>
         public double EstimateSelectivity(string predicate, Statistic stats) {
-            // TODO: Perkiraan selectivity yang lebih canggih
-            // Untuk sekarang, return selectivity default
+            if (string.IsNullOrWhiteSpace(predicate))
+            {
+                return 1.0; // Selektivitas penuh jika tidak ada predicate
+            }
 
-            if (string.IsNullOrEmpty(predicate))
-                return 1.0; // No filter, semua baris dipilih
+            var conds = QueryRewriter.SplitConjunctiveConditions(predicate);
+            if (conds.Count == 0)
+            {
+                conds.Add(predicate);
+            }
 
-            // Heuristik sederhana: equality predicate = 1/distinctValues
-            if (predicate.Contains("="))
-                return 1.0 / Math.Max(stats.DistinctValues, 1);
-
-            // Range predicate: Asumsi 30% selectivity
-            if (predicate.Contains("<") || predicate.Contains(">"))
-                return 0.3;
-
-            // Default selectivity
-            return 0.5;
+            double selectivity = 1.0;
+            foreach (var cond in conds)
+            {
+                selectivity *= EstimateConditionSelectivity(cond, stats);
+            }
+            return Math.Clamp(selectivity, 0.01, 1.0);
         }
+
+        private double EstimateConditionSelectivity(string condition, Statistic stats)
+        {
+            var normalizedCondition = condition.Trim();
+            // Cek pola kondisi
+            if (string.IsNullOrEmpty(normalizedCondition))
+            {
+                return 1.0;
+            }
+            if (EqualityRegex.IsMatch(normalizedCondition))
+            {
+                return Math.Clamp(1.0 / Math.Max(stats.DistinctValues, 1), 0.01, 0.5); // Asumsi 1/distinct values
+            }
+            else if (RangeRegex.IsMatch(normalizedCondition))
+            {
+                return 0.3; // Asumsi 30% untuk range
+            }
+            else if (BetweenRegex.IsMatch(normalizedCondition))
+            {
+                return 0.25; // Asumsi 25%
+            }
+            else if (LikePrefixRegex.IsMatch(normalizedCondition))
+            {
+                return 0.2; // Asumsi 20%
+            }
+            else if (InListRegex.IsMatch(normalizedCondition))
+            {
+                var match = InListRegex.Match(normalizedCondition);
+                var listValues = match.Groups["list"].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                double fraction = (double)listValues.Length / Math.Max(stats.DistinctValues, 1);
+                return Math.Clamp(fraction, 0.05, 0.8); // Limit antara 5% sampai 80%
+            }
+            else
+            {
+                return 0.5; // Default asumsi 50%
+            }
+        }
+
+        /// <summary>
+        /// Mencoba ambil statistik dari StorageManager
+        /// </summary>
+        private Statistic? TryGetStatsFromSM(string tableName)
+        {
+            if (string.IsNullOrWhiteSpace(tableName))
+            {
+                return null;
+            }
+            try
+            {
+                return _storageManager.GetStats(tableName);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Statistic CreateDefaultStats(string tableName)
+        {
+            return new Statistic
+            {
+                Table = tableName,
+                TupleCount = 1000,
+                BlockCount = 100,
+                TupleSize = 100,
+                BlockingFactor = 100,
+                DistinctValues = 100
+            };
+        }
+
+        private (Statistic, Statistic) ResolveJoinStats(QueryPlanStep step)
+        {
+            var left = GetParameter(step, "LeftTable") ?? step.Table;
+            var right = GetParameter(step, "RightTable") ?? step.Table;
+            var leftStats = TryGetStatsFromSM(left) ?? CreateDefaultStats(left ?? step.Table);
+            var rightStats = TryGetStatsFromSM(right) ?? CreateDefaultStats(right ?? step.Table);
+            return (leftStats, rightStats);
+        }
+
+        private static string? GetParameter(QueryPlanStep step, string param)
+        {
+            if (step.Parameters == null) return null;
+            return step.Parameters.TryGetValue(param, out var value) ? value?.ToString() : null;
+        }
+
 
         /// <summary>
         /// Safe log2 function supaya gak ada log(0)
