@@ -9,23 +9,20 @@ namespace mDBMS.FailureRecovery
 {
     public class FailureRecoveryManager : IFailureRecoveryManager, IBufferManager
     {
-        private readonly BufferPool _bufferPool;
+        private readonly mDBMS.Common.Data.BufferPool _bufferPool;
 
-        // Dependency untuk Query Processor (untuk recovery query)
         private IQueryProcessor? _queryProcessor;
-
-        // Dependency untuk Storage Manager (untuk checkpoint flush)
         private IStorageManager? _storageManager;
 
         private readonly string _logFilePath;
         private readonly string _logDirectory;
         private long _currentLSN;
         private readonly object _logLock = new object();
-        private byte[]? _buffer;
 
         public FailureRecoveryManager(IQueryProcessor? queryProcessor = null, IStorageManager? storageManager = null)
         {
-            _bufferPool = new BufferPool();
+            _bufferPool = new mDBMS.Common.Data.BufferPool();
+            
             _queryProcessor = queryProcessor;
             _storageManager = storageManager;
 
