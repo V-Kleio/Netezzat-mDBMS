@@ -116,7 +116,7 @@ namespace mDBMS.QueryOptimizer
                 Description = $"Update {query.UpdateOperations.Count} column(s) in {query.Table}",
                 Table = query.Table,
                 EstimatedCost = updateCost,
-                Parameters = new Dictionary<string, object?> { ["updates"] = query.UpdateOperations }
+                Parameters = new Dictionary<string, object?> { ["updates"] = qualifiedUpdates }
             });
 
             plan.TotalEstimatedCost = plan.Steps.Sum(s => s.EstimatedCost);
