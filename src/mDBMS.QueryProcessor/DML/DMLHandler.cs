@@ -42,6 +42,31 @@ namespace mDBMS.QueryProcessor.DML
         private ExecutionResult HandleSelect(string query, int transactionId)
         {
             Query parsedQuery = _queryOptimizer.ParseQuery(query);
+
+            // Meminta izin read dari Concurrency Control Manager
+            var action = new Common.Transaction.Action(
+                Common.Transaction.Action.ActionType.Read,
+                DatabaseObject.CreateRow("ANY", parsedQuery.Table),
+                transactionId,
+                query
+            );
+
+            // validasi ke Concurrency Control Manager
+            var response = _concurrencyControlManager.ValidateObject(action);
+
+            if (!response.Allowed)
+            {
+                _concurrencyControlManager.AbortTransaction(transactionId);
+
+                return new ExecutionResult()
+                {
+                    Query = query,
+                    Success = false,
+                    Message = $"Read operation ditolak oleh CCM: {response.Reason}",
+                    TransactionId = transactionId
+                };
+            }
+
             QueryPlan queryPlan = _queryOptimizer.OptimizeQuery(parsedQuery);
 
             LocalTableStorage storage = new LocalTableStorage();
