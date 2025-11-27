@@ -29,31 +29,34 @@ class ProcessorProxy : IQueryProcessor
         byte[] buffer = new byte[128];
         int length = 0;
 
-        using (TcpClient client = new(endpoint))
+        try
         {
-            client.GetStream().Write(message);
-            client.Client.Shutdown(SocketShutdown.Send);
-
-            length += client.GetStream().Read(buffer, length, buffer.Length - length);
-            while (length == buffer.Length)
+            using (TcpClient client = new(endpoint.Address.ToString(), endpoint.Port))
             {
-                Array.Resize(ref buffer, buffer.Length * 2);
-                length += client.GetStream().Read(buffer, length, buffer.Length - length);
-            }
-
-            try
-            {
-                result = decoder.Decode(buffer, 0, length);
-            }
-            catch (Exception e)
-            {
-                result = new()
+                using (NetworkStream stream = client.GetStream())
                 {
-                    Query = query,
-                    Success = false,
-                    Message = e.Message
-                };
+                    stream.Write(message);
+                    stream.Socket.Shutdown(SocketShutdown.Send);
+        
+                    length += stream.Read(buffer, length, buffer.Length - length);
+                    while (length == buffer.Length)
+                    {
+                        Array.Resize(ref buffer, buffer.Length * 2);
+                        length += stream.Read(buffer, length, buffer.Length - length);
+                    }
+                }
+                
+                result = decoder.Decode(buffer, 0, length);                
             }
+        }
+        catch (ArgumentException e)
+        {
+            result = new()
+            {
+                Query = query,
+                Success = false,
+                Message = e.Message
+            };
         }
 
         return result;
