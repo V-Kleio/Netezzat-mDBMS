@@ -3,37 +3,70 @@ using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
 using mDBMS.Common.Transaction;
 
+// TODO: Get therapy
+
 namespace mDBMS.QueryProcessor.DML
 {
     internal class DMLHandler : IQueryHandler
     {
         private readonly IStorageManager _storageManager;
         private readonly IQueryOptimizer _queryOptimizer;
-        private readonly QueryProcessor _processor;
+        private readonly IConcurrencyControlManager _concurrencyControlManager;
+        private readonly IFailureRecoveryManager _failureRecoveryManager;
 
-        public DMLHandler(IStorageManager storageManager, IQueryOptimizer queryOptimizer, QueryProcessor processor)
-        {
+        public DMLHandler(
+            IStorageManager storageManager,
+            IQueryOptimizer queryOptimizer,
+            IConcurrencyControlManager concurrencyControlManager,
+            IFailureRecoveryManager failureRecoveryManager
+        ) {
             _storageManager = storageManager;
             _queryOptimizer = queryOptimizer;
-            _processor = processor;
+            _concurrencyControlManager = concurrencyControlManager;
+            _failureRecoveryManager = failureRecoveryManager;
         }
 
-        public ExecutionResult HandleQuery(string query)
+        public ExecutionResult HandleQuery(string query, int transactionId)
         {
             string upper = query.Split()[0].Trim().ToUpperInvariant();
             return upper switch
             {
-                "SELECT" => HandleSelect(query),
-                "INSERT" => HandleInsert(query),
-                "UPDATE" => HandleUpdate(query),
-                "DELETE" => HandleDelete(query),
-                _ => HandleUnrecognized(query)
+                "SELECT" => HandleSelect(query, transactionId),
+                "INSERT" => HandleInsert(query, transactionId),
+                "UPDATE" => HandleUpdate(query, transactionId),
+                "DELETE" => HandleDelete(query, transactionId),
+                _ => HandleUnrecognized(query, transactionId)
             };
         }
 
-        private ExecutionResult HandleSelect(string query)
+        private ExecutionResult HandleSelect(string query, int transactionId)
         {
             Query parsedQuery = _queryOptimizer.ParseQuery(query);
+
+            // Meminta izin read dari Concurrency Control Manager
+            var action = new Common.Transaction.Action(
+                Common.Transaction.Action.ActionType.Read,
+                DatabaseObject.CreateRow("ANY", parsedQuery.Table),
+                transactionId,
+                query
+            );
+
+            // validasi ke Concurrency Control Manager
+            var response = _concurrencyControlManager.ValidateObject(action);
+
+            if (!response.Allowed)
+            {
+                _concurrencyControlManager.AbortTransaction(transactionId);
+
+                return new ExecutionResult()
+                {
+                    Query = query,
+                    Success = false,
+                    Message = $"Read operation ditolak oleh CCM: {response.Reason}",
+                    TransactionId = transactionId
+                };
+            }
+
             QueryPlan queryPlan = _queryOptimizer.OptimizeQuery(parsedQuery);
 
             LocalTableStorage storage = new LocalTableStorage();
@@ -59,7 +92,7 @@ namespace mDBMS.QueryProcessor.DML
                     Query = query,
                     Success = false,
                     Message = $"Operasi {step.Operation} untuk SELECT tidak didukung.",
-                    TransactionId = _processor.ActiveTransactionId
+                    TransactionId = transactionId
                 };
 
                 IEnumerable<Row> result = op.GetRows();
@@ -82,11 +115,11 @@ namespace mDBMS.QueryProcessor.DML
                 Success = true,
                 Message = $"",
                 Data = storage.lastResult,
-                TransactionId = _processor.ActiveTransactionId
+                TransactionId = transactionId
             };
         }
 
-        private ExecutionResult HandleInsert(string query)
+        private ExecutionResult HandleInsert(string query, int transactionId)
         {
             var data = new Dictionary<string, object>
             {
@@ -108,7 +141,7 @@ namespace mDBMS.QueryProcessor.DML
                 Query = query,
                 Success = true,
                 Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager.",
-                TransactionId = _processor.ActiveTransactionId,
+                TransactionId = transactionId,
                 TableName = tableName,
                 AfterImage = afterImage,
                 BeforeImage = null,
@@ -116,41 +149,119 @@ namespace mDBMS.QueryProcessor.DML
             };
         }
 
-        private ExecutionResult HandleUpdate(string query)
+        private ExecutionResult HandleUpdate(string query, int transactionId)
         {
-            // ekstrak nama tabel dari query
-            string tableName = ExtractTableNameFromQuery(query, "UPDATE");
+            Query parsedQuery = _queryOptimizer.ParseQuery(query);
 
-            // untuk UPDATE, harus baca data lama terlebih dahulu (BeforeImage)
-            var retrieval = new DataRetrieval(tableName, new[] { "*" });
-            var beforeRows = _storageManager.ReadBlock(retrieval).ToList();
+            // At this point I don't care about making beautiful code anymore
+            // I'm just gonna do what works (compiles)
 
-            var data = new Dictionary<string, object>
+            Condition? condition = null;
+
+            if (parsedQuery.WhereClause is not null)
             {
-                ["example_col"] = "value"
-            };
+                var operations = new Dictionary<string, Condition.Operation>()
+                {
+                    ["<"] = Condition.Operation.LT,
+                    [">"] = Condition.Operation.GT,
+                    ["="] = Condition.Operation.EQ,
+                    ["!="] = Condition.Operation.NEQ,
+                    ["<>"] = Condition.Operation.NEQ,
+                    [">="] = Condition.Operation.GEQ,
+                    ["<="] = Condition.Operation.LEQ,
+                };
 
-            var write = new DataWrite(tableName, data);
-            var affected = _storageManager.WriteBlock(write);
+                foreach ((string opchar, var operation) in operations)
+                {
+                    string[] operands = parsedQuery.WhereClause.Split(opchar, 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 
-            // serialize before dan after image
-            string? beforeImage = beforeRows.Any() ? SerializeRowData(beforeRows.First()) : null;
-            string afterImage = SerializeData(data);
+                    if (operands.Length < 2) continue;
+
+                    foreach (string operand in operands)
+                    {
+                        if (!operand.All(c => char.IsAsciiLetterOrDigit(c) || c == '.' || c == '_'))
+                        {
+                            return new();
+                        }
+                    }
+
+                    condition = new()
+                    {
+                        lhs = operands[0],
+                        rhs = operands[1],
+                        opr = operation
+                    };
+
+                    break;
+                }
+            }
+
+            Dictionary<string, object> newValues = new();
+            foreach ((var key, var val) in parsedQuery.UpdateOperations)
+            {
+                if (int.TryParse(val, out int intval))
+                {
+                    newValues.Add(key, intval);
+                }
+                else if (float.TryParse(val, out float floatval))
+                {
+                    newValues.Add(key, floatval);
+                }
+                else
+                {
+                    newValues.Add(key, val);
+                }
+            }
+
+            // Wtf is serialize data doing????
+            // Why are we only serializing the first rows to log????
+            // Why are there 2 functions????
+
+            DataRetrieval readRequest = new DataRetrieval(parsedQuery.Table, [], condition);
+            var beforeImage = SerializeRowData(_storageManager.ReadBlock(readRequest).ToList().First());
+
+            // We must now lock every row...
+            // How does one procure the row id?
+            for (int i = 0; i < beforeImage.Length; i++)
+            {
+                var action = new Common.Transaction.Action(
+                    Common.Transaction.Action.ActionType.Write,
+                    DatabaseObject.CreateRow("temp", parsedQuery.Table),
+                    transactionId, query
+                );
+
+                var response = _concurrencyControlManager.ValidateObject(action);
+
+                if (!response.Allowed)
+                {
+                    _concurrencyControlManager.AbortTransaction(transactionId);
+                    return new()
+                    {
+                        Query = query,
+                        Success = false,
+                        Message = "Could not validate transaction operation: " + response.Reason
+                    };
+                }
+            }
+
+            DataWrite writeRequest = new(parsedQuery.Table, newValues, condition);
+            int affectedRowCount = _storageManager.WriteBlock(writeRequest);
+            var afterImage = SerializeData(_storageManager.ReadBlock(readRequest).ToList().First().Columns);
 
             return new ExecutionResult()
             {
                 Query = query,
                 Success = true,
-                Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager.",
-                TransactionId = _processor.ActiveTransactionId,
-                TableName = tableName,
+                Message = $"{affectedRowCount} row(s) ditulis/diperbarui melalui Storage Manager.",
+                TransactionId = transactionId,
+                TableName = parsedQuery.Table,
                 BeforeImage = beforeImage,
                 AfterImage = afterImage,
                 RowIdentifier = "UNKNOWN"
             };
         }
 
-        private ExecutionResult HandleDelete(string query)
+        private ExecutionResult HandleDelete(string query, int transactionId)
         {
             // ekstrak nama tabel dari query
             string tableName = ExtractTableNameFromQuery(query, "DELETE");
@@ -171,7 +282,7 @@ namespace mDBMS.QueryProcessor.DML
                 Query = query,
                 Success = true,
                 Message = $"{deleted} row(s) dihapus melalui Storage Manager.",
-                TransactionId = _processor.ActiveTransactionId,
+                TransactionId = transactionId,
                 TableName = tableName,
                 BeforeImage = beforeImage,
                 AfterImage = null,
@@ -179,14 +290,14 @@ namespace mDBMS.QueryProcessor.DML
             };
         }
 
-        private ExecutionResult HandleUnrecognized(string query)
+        private ExecutionResult HandleUnrecognized(string query, int transactionId)
         {
             return new ExecutionResult()
             {
                 Query = query,
                 Success = false,
                 Message = "Tipe DML query tidak dikenali atau belum didukung.",
-                TransactionId = _processor.ActiveTransactionId
+                TransactionId = transactionId
             };
         }
 

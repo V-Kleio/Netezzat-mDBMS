@@ -1,21 +1,31 @@
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
+using mDBMS.QueryOptimizer.Core;
 using System.Text.RegularExpressions;
 
 namespace mDBMS.QueryOptimizer
 {
     /// <summary>
-    /// Engine utama untuk Query Optimization
-    /// Menghasilkan execution plan yang optimal
+    /// Engine utama untuk Query Optimization.
+    /// Orchestrator yang mengkoordinasikan parsing, building, dan optimization.
+    /// 
+    /// Flow:
+    /// 1. ParseQuery: SQL string -> Query object (via SqlLexer + SqlParser)
+    /// 2. OptimizeQuery: Query object -> QueryPlan dengan PlanNode tree
+    /// 3. Return: QueryPlan (dengan PlanTree dan Steps untuk backward compatibility)
+    /// 
+    /// Principle: Orchestration - delegate ke specialized components
     /// </summary>
     public class QueryOptimizerEngine : IQueryOptimizer {
         private readonly IStorageManager _storageManager;
-        private readonly CostEstimator _costEstimator;
+        private readonly ICostModel _costModel;
+        private readonly PlanBuilder _planBuilder;
 
-        public QueryOptimizerEngine(IStorageManager storageManager)
+        public QueryOptimizerEngine(IStorageManager storageManager, QueryOptimizerOptions? options = null)
         {
             _storageManager = storageManager;
-            _costEstimator = new CostEstimator(storageManager);
+            _costModel = new SimpleCostModel();
+            _planBuilder = new PlanBuilder(storageManager, _costModel);
         }
 
         /// <summary>
@@ -28,92 +38,129 @@ namespace mDBMS.QueryOptimizer
             var lexer = new SqlLexer(queryString);
             var tokens = lexer.Tokenize();
             var parser = new SqlParser(tokens);
-            var query = parser.ParseSelect();
+            var query = parser.Parser();
             return query;
         }
 
         /// <summary>
-        /// Mengoptimalkan query dan menghasilkan execution plan yang efisien
+        /// Mengoptimalkan query dan menghasilkan execution plan yang efisien.
+        /// 
+        /// QueryPlan.PlanTree berisi tree structure.
+        /// QueryPlan.Steps berisi flat list (generated dari tree) untuk backward compatibility.
         /// </summary>
         /// <param name="query">Query yang akan dioptimalkan</param>
-        /// <returns>Optimized query execution plan</returns>
+        /// <returns>Optimized query execution plan dengan tree dan flat steps</returns>
         public QueryPlan OptimizeQuery(Query query) {
-            // Step 1: Aplikasikan aturan ekuivalensi aljabar relasional (heuristik)
-            var rewrittenQuery = QueryRewriter.ApplyHeuristicRules(query);
-
-            // Step 2: Generate plan alternatif berdasarkan query yang sudah di-rewrite
-            var alternativePlans = GenerateAlternativePlans(rewrittenQuery).ToList();
-
-            // Step 3: Tambahkan plan berbasis heuristik murni
-            var heuristicPlan = HeuristicOptimizer.ApplyHeuristicOptimization(rewrittenQuery, _storageManager);
-            alternativePlans.Add(heuristicPlan);
-
-            // Step 4: Pilih plan dengan cost termurah (cost-based optimization)
-            var bestPlan = alternativePlans
-                .OrderBy(p => GetCost(p))
-                .FirstOrDefault();
-
-            if (bestPlan == null)
+            // Handle UPDATE bypass
+            if (query.Type == QueryType.UPDATE)
             {
-                // Fallback: buat basic plan
-                bestPlan = new QueryPlan {
-                    OriginalQuery = query,
-                    Strategy = OptimizerStrategy.COST_BASED
-                };
+                return GenerateUpdatePlan(query);
             }
+            // Build plan tree menggunakan PlanBuilder (heuristic-based)
+            PlanNode planTree = _planBuilder.BuildPlan(query);
 
-            // Step 5: Hitung cost akhir
-            bestPlan.TotalEstimatedCost = GetCost(bestPlan);
+            // Convert tree ke QueryPlan
+            var queryPlan = planTree.ToQueryPlan();
+            queryPlan.OriginalQuery = query;
+            queryPlan.PlanTree = planTree; // Set tree reference
 
-            return bestPlan;
+            return queryPlan;
+        }
+
+        /// <summary>
+        /// Generate query plan untuk UPDATE statement.
+        /// </summary>
+        private QueryPlan GenerateUpdatePlan(Query query) {
+            var plan = new QueryPlan {
+                OriginalQuery = query,
+                Strategy = OptimizerStrategy.RULE_BASED,
+                PlanTree = null
+            };
+
+            var stats = _storageManager.GetStats(query.Table);
+            double selectivity = _costModel.EstimateSelectivity(query.WhereClause ?? "", stats);
+            double affectedRows = stats.TupleCount * selectivity;
+
+            // Cek apakah ada index yang bisa digunakan untuk WHERE
+            var indexedColumns = stats.Indices.Select(i => i.Item1).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var whereColumns = SqlParserHelpers.ExtractPredicateColumns(query.WhereClause);
+            var indexedWhereCol = whereColumns.FirstOrDefault(c => indexedColumns.Contains(c));
+            bool useIndex = indexedWhereCol != null && !string.IsNullOrWhiteSpace(query.WhereClause);
+
+            // Cari baris (Scan/Seek)
+            plan.Steps.Add(new QueryPlanStep {
+                Order = 1,
+                Operation = useIndex ? OperationType.INDEX_SEEK : OperationType.TABLE_SCAN,
+                Description = useIndex 
+                    ? $"Index seek on {query.Table} using index on {indexedWhereCol}"
+                    : $"Full table scan on {query.Table}",
+                Table = query.Table,
+                IndexUsed = indexedWhereCol,
+                EstimatedCost = useIndex 
+                    ? _costModel.EstimateIndexSeek(stats, selectivity)
+                    : _costModel.EstimateTableScan(stats),
+                Parameters = new Dictionary<string, object?> { ["predicate"] = query.WhereClause }
+            });
+
+            // Qualify column names di UpdateOperations
+            var qualifiedUpdates = query.UpdateOperations.ToDictionary(
+                kvp => kvp.Key.Contains('.') ? kvp.Key : $"{query.Table}.{kvp.Key}",
+                kvp => kvp.Value
+            );
+
+            // Update
+            double updateCost = _costModel.EstimateUpdate(affectedRows, stats.BlockingFactor);
+            plan.Steps.Add(new QueryPlanStep {
+                Order = 2,
+                Operation = OperationType.UPDATE,
+                Description = $"Update {query.UpdateOperations.Count} column(s) in {query.Table}",
+                Table = query.Table,
+                EstimatedCost = updateCost,
+                Parameters = new Dictionary<string, object?> { ["updates"] = query.UpdateOperations }
+            });
+
+            plan.TotalEstimatedCost = plan.Steps.Sum(s => s.EstimatedCost);
+            plan.EstimatedRows = (int)affectedRows;
+            return plan;
+        }
+
+        /// <summary>
+        /// Optimize query dan return PlanNode tree directly.
+        /// Ini adalah method untuk direct tree access.
+        /// </summary>
+        /// <param name="query">Query yang akan dioptimalkan</param>
+        /// <returns>Root node dari optimized plan tree</returns>
+        public PlanNode OptimizeQueryTree(Query query)
+        {
+            return _planBuilder.BuildPlan(query);
         }
 
         /// <summary>
         /// Menghitung estimasi cost untuk sebuah query plan
+        /// Cost sudah dihitung saat build tree, method ini hanya return total.
         /// </summary>
         /// <param name="plan">Query plan yang akan dihitung costnya</param>
         /// <returns>Estimasi cost dalam bentuk numerik</returns>
-        public double GetCost(QueryPlan plan) {
-            // Rumus dasar: Total Cost = sum(EstimatedStepCost)
-            // EstimatedStepCost dihitung oleh CostEstimator menggunakan statistik Storage Manager
-
-            double totalCost = 0.0;
-
-            for (int i = 0; i < plan.Steps.Count; i++) {
-                var step = plan.Steps[i];
-                var cost = _costEstimator.EstimateStepCost(step, plan.OriginalQuery);
-                step.EstimatedCost = cost;
-                totalCost += cost;
-            }
-
-            return totalCost;
+        public double GetCost(QueryPlan plan)
+        {
+            // Cost sudah calculated di PlanBuilder, tinggal return
+            return plan.TotalEstimatedCost;
         }
 
         /// <summary>
         /// Menggenerate beberapa alternatif query plan
+        /// Untuk sekarang hanya return satu plan dari PlanBuilder
+        /// TODO: Implement multiple plan alternatives dengan different strategies
         /// </summary>
         /// <param name="query">Query yang akan dianalisis</param>
         /// <returns>Daftar alternatif query plan</returns>
-        public IEnumerable<QueryPlan> GenerateAlternativePlans(Query query) {
-            // TODO: Generate beberapa alternatif rencana eksekusi
-            var plans = new List<QueryPlan>();
-
-            // Plan 1: Table Scan Strategy
-            plans.Add(GenerateTableScanPlan(query));
-
-            // Plan 2: Index Scan Strategy (jika dapat diterapkan)
-            var indexPlan = GenerateIndexScanPlan(query);
-            if (indexPlan != null) {
-                plans.Add(indexPlan);
-            }
-
-            // Plan 3: Filter Pushdown Strategy
-            plans.Add(GenerateFilterPushdownPlan(query));
-
-            return plans;
+        public IEnumerable<QueryPlan> GenerateAlternativePlans(Query query)
+        {
+            // Untuk sekarang, hanya return satu optimal plan dari PlanBuilder
+            yield return OptimizeQuery(query);
         }
+    
 
-        #region Helper Methods (Private)
 
         /// <summary>
         /// Generate plan dengan strategi table scan
@@ -319,8 +366,6 @@ namespace mDBMS.QueryOptimizer
             return plan;
         }
 
-        #endregion
-
         #region Qualification Helpers
         // Pastikan referensi kolom memakai fullname: table.column
         private static string QualifyColumn(string? column, string table)
@@ -384,6 +429,12 @@ namespace mDBMS.QueryOptimizer
             });
 
             return result;
+        }
+        private static string StripTableAlias(string column)
+        {
+            if (string.IsNullOrWhiteSpace(column)) return string.Empty;
+            var partIdx = column.IndexOf('.');
+            return partIdx >= 0 ? column.Substring(partIdx + 1) : column;
         }
         #endregion
     }
