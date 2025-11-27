@@ -59,4 +59,12 @@ public interface IConcurrencyControlManager
     /// <param name="transactionId">ID transaksi yang akan di-commit</param>
     /// <returns>True jika berhasil, false jika gagal</returns>
     bool CommitTransaction(int transactionId);
+
+    /// <summary>
+    /// Mencatat (log) sebuah objek pada transaksi tertentu.
+    /// Log ini dapat digunakan untuk menerapkan lock pada suatu objek atau memberikan timestamp pada objek tersebut.
+    /// </summary>
+    /// <param name="obj">Objek database yang akan di-log</param>
+    /// <param name="transactionId">ID transaksi yang mengakses objek</param>
+    void LogObject(DatabaseObject obj, int transactionId);
 }

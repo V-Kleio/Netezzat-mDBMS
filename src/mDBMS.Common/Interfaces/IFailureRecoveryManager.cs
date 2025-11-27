@@ -15,5 +15,7 @@ namespace mDBMS.Common.Interfaces
 		//RecoverCriteria udah ada di mDBMS.Common/DTOs
         void Recover(RecoverCriteria criteria);
 
+		bool UndoTransaction(int transactionId);
+
     }
 }

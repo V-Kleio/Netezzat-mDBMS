@@ -50,6 +50,11 @@ public class Query {
     /// </summary>
     public List<string> SelectedColumns { get; set; } = new List<string>();
 
+    ///<ummary>
+    /// Mapping kolom dan nilai baru untuk UPDATE
+    /// </summary>
+    public Dictionary<string, string> UpdateOperations { get; set; } = new Dictionary<string, string>();
+    
     /// <summary>
     /// Kondisi WHERE
     /// </summary>
