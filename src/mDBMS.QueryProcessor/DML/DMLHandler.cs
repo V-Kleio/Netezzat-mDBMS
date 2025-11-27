@@ -195,6 +195,30 @@ namespace mDBMS.QueryProcessor.DML
             DataRetrieval readRequest = new DataRetrieval(parsedQuery.Table, [], condition);
             var beforeImage = SerializeRowData(_storageManager.ReadBlock(readRequest).ToList().First());
 
+            // We must now lock every row...
+            // How does one procure the row id?
+            for (int i = 0; i < beforeImage.Length; i++)
+            {
+                var action = new Common.Transaction.Action(
+                    Common.Transaction.Action.ActionType.Write,
+                    DatabaseObject.CreateRow("temp", parsedQuery.Table),
+                    transactionId, query
+                );
+
+                var response = _concurrencyControlManager.ValidateObject(action);
+
+                if (!response.Allowed)
+                {
+                    _concurrencyControlManager.AbortTransaction(transactionId);
+                    return new()
+                    {
+                        Query = query,
+                        Success = false,
+                        Message = "Could not validate transaction operation: " + response.Reason
+                    };
+                }
+            }
+
             DataWrite writeRequest = new(parsedQuery.Table, newValues, condition);
             int affectedRowCount = _storageManager.WriteBlock(writeRequest);
             var afterImage = SerializeData(_storageManager.ReadBlock(readRequest).ToList().First().Columns);
