@@ -13,7 +13,10 @@ public enum OperationType {
     SORT,
     FILTER,
     PROJECTION,
-    AGGREGATION
+    AGGREGATION,
+    UPDATE
+    // INSERT
+    // DELETE
 }
 
 /// <summary>
@@ -100,6 +103,13 @@ public class QueryPlan {
     /// Strategi optimisasi yang dipakai
     /// </summary>
     public OptimizerStrategy Strategy { get; set; }
+
+    /// <summary>
+    /// Root node dari plan tree (NEW: tree-based representation).
+    /// Jika ada, ini adalah representasi tree dari query plan.
+    /// Steps (flat list) akan di-generate dari tree ini.
+    /// </summary>
+    public PlanNode? PlanTree { get; set; }
 
     /// <summary>
     /// Waktu pembuatan query plan

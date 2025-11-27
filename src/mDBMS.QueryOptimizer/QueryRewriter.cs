@@ -1,5 +1,4 @@
 using mDBMS.Common.QueryData;
-using mDBMS.Common.Interfaces;
 using System.Text.RegularExpressions;
 
 namespace mDBMS.QueryOptimizer;
@@ -370,7 +369,7 @@ internal static class QueryRewriter
 internal static class HeuristicOptimizer
 {
     /// <summary>
-    /// Aplikasikan aturan heuristik klasik untuk optimisasi:
+    /// Langkah aturan heuristik klasik yang dipakai untuk optimisasi:
     /// 1. Lakukan seleksi sedini mungkin (filter pushdown)
     /// 2. Lakukan proyeksi sedini mungkin untuk mengurangi ukuran intermediate result
     /// 3. Lakukan join paling selektif terlebih dahulu (smallest intermediate results)
@@ -394,7 +393,7 @@ internal static class HeuristicOptimizer
             // Dekomposisi kondisi konjunktif
             var conditions = QueryRewriter.SplitConjunctiveConditions(query.WhereClause);
 
-            // Untuk setiap kondisi, coba aplikasikan pada level scan
+            // Untuk setiap kondisi, aplikasikan pada level scan
             plan.Steps.Add(new QueryPlanStep
             {
                 Order = stepOrder++,
@@ -516,7 +515,7 @@ internal static class HeuristicOptimizer
     /// Aturan Heuristik: Order join berdasarkan selectivity.
     /// Join dengan hasil terkecil (paling selektif) dilakukan terlebih dahulu.
     /// 
-    /// Mengimplementasikan:
+    /// Implementasi dari:
     /// - Aturan 6: Komutativitas join - E1(JOIN)E2 = E2(JOIN)E1
     /// - Aturan 7: Asosiatifitas join - (E1(JOIN)E2)(JOIN)E3 = E1(JOIN)(E2(JOIN)E3)
     /// 

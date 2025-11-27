@@ -5,18 +5,18 @@ namespace mDBMS.QueryProcessor.Transaction
 {
     internal class AbortTransactionHandler : IQueryHandler
     {
-        private readonly QueryProcessor _processor;
         private readonly IConcurrencyControlManager _concurrencyControlManager;
+        private readonly IFailureRecoveryManager _failureRecoveryManager; 
 
-        public AbortTransactionHandler(QueryProcessor processor, IConcurrencyControlManager concurrencyControlManager)
+        public AbortTransactionHandler(IConcurrencyControlManager concurrencyControlManager, IFailureRecoveryManager failureRecoveryManager) 
         {
-            _processor = processor;
             _concurrencyControlManager = concurrencyControlManager;
+            _failureRecoveryManager = failureRecoveryManager; 
         }
 
-        public ExecutionResult HandleQuery(string query)
+        public ExecutionResult HandleQuery(string query, int transactionId)
         {
-            if (!_processor.ActiveTransactionId.HasValue)
+            if (transactionId == -1) // Cek apakah ada transaksi aktif
             {
                 return new ExecutionResult()
                 {
@@ -27,15 +27,21 @@ namespace mDBMS.QueryProcessor.Transaction
                 };
             }
 
-            var transactionId = _processor.ActiveTransactionId.Value;
+            // 1. Panggil CCM untuk me-release lock dan ganti status
             _concurrencyControlManager.EndTransaction(transactionId, false);
-            _processor.ActiveTransactionId = null;
+            
+            // 2. Panggil FRM untuk melakukan UNDO Recovery
+            bool undoSuccess = _failureRecoveryManager.UndoTransaction(transactionId);
+            
             return new ExecutionResult()
             {
                 Query = query,
-                Success = true,
-                Message = $"Transaksi {transactionId} telah di-ABORT.",
-                TransactionId = transactionId
+                Success = undoSuccess,
+                Message = undoSuccess 
+                    ? $"Transaksi {transactionId} telah di-ABORT dan UNDO berhasil." 
+                    : $"Transaksi {transactionId} di-ABORT, namun UNDO gagal.",
+                TransactionId = transactionId,
+                TableName = "ABORT" 
             };
         }
     }

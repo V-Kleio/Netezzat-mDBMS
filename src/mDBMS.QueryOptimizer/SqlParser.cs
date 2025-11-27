@@ -29,6 +29,20 @@ internal sealed class SqlParser
     private bool Match(SqlTokenType t) { if (Peek().Type == t) { _pos++; return true; } return false; }
 
     /// <summary>
+    /// Entry Point untuk parsing SQL.
+    /// </summary>
+    public Query Parser()
+    {
+        var first = Peek();
+        return first.Type switch
+        {
+            SqlTokenType.SELECT => ParseSelect(),
+            SqlTokenType.UPDATE => ParseUpdate(),
+            _ => throw new InvalidOperationException($"Unsupported query type: {first.Type}")
+        };
+    }
+
+    /// <summary>
     /// Parse SELECT ... FROM ... [JOIN ... ON ...]* [WHERE ...] [GROUP BY ...] [ORDER BY ...]
     /// </summary>
     public Query ParseSelect()
@@ -71,6 +85,89 @@ internal sealed class SqlParser
         return q;
     }
 
+    /// <summary>
+    /// Parse UPDATE ... SET ... [WHERE ...]
+    /// </summary>
+    public Query ParseUpdate()
+    {
+        var q = new Query { Type = QueryType.UPDATE };
+        Expect(SqlTokenType.UPDATE);
+        q.Table = ParseIdentifier();
+        Expect(SqlTokenType.SET);
+        q.UpdateOperations = ParseSetList();
+        if (Match(SqlTokenType.WHERE))
+        {
+            q.WhereClause = ReadUntilKeywords(SqlTokenType.EOF).Trim();
+        }
+        if (Peek().Type != SqlTokenType.EOF)
+        {
+            throw new InvalidOperationException($"Unexpected token after end of UPDATE: {Peek().Lexeme}");
+        }
+        return q;
+    }
+    /// <summary>
+    /// Parse daftar kolom dan nilai untuk klausa SET pada UPDATE.
+    /// </summary>
+    /// <returns></returns>
+    /// <exception cref="InvalidOperationException"></exception>
+    private Dictionary<string, string> ParseSetList()
+    {
+        var updates = new Dictionary<string, string>();
+        if (Peek().Type == SqlTokenType.WHERE || Peek().Type == SqlTokenType.EOF)
+            throw new InvalidOperationException("SET clause cannot be empty");
+        do {
+            var col = ParseIdentifier();
+            if (updates.ContainsKey(col))
+            {
+                throw new InvalidOperationException($"Duplicate column in SET list: {col}");
+            }
+            Expect(SqlTokenType.EQUAL);
+            var val = ReadValueOrExpression();
+            updates[col] = val;
+        } while (Match(SqlTokenType.COMMA));
+        return updates;
+    }
+
+    private string ReadValueOrExpression()
+    {
+        var sb = new StringBuilder();
+        int depth = 0;
+        bool hasToken = false;
+
+        while (true) {
+            var t = Peek();
+            if (t.Type == SqlTokenType.EOF || (depth == 0 && (t.Type == SqlTokenType.COMMA || t.Type == SqlTokenType.WHERE)))
+            {
+                break;
+            }
+            if (t.Type == SqlTokenType.EQUAL)
+            {
+                throw new InvalidOperationException("Unexpected '=' inside SET expression");
+            }
+            if (t.Type == SqlTokenType.OPEN_PAREN) depth++;
+            if (t.Type == SqlTokenType.CLOSE_PAREN)   
+            {
+                depth--;
+                if (depth < 0)
+                    {
+                        throw new InvalidOperationException("Unbalanced closing parenthesis in SET expression");
+                    }
+            }
+            hasToken = true;
+            sb.Append(Consume().Lexeme + " ");
+        }
+
+        if (!hasToken)
+            {
+                throw new InvalidOperationException("Empty value in SET assignment");
+            }
+        if (depth != 0)
+            {
+                throw new InvalidOperationException("Unbalanced parentheses in SET expression");
+            }
+    return sb.ToString().Trim();
+    }
+    
     private void Expect(SqlTokenType type)
     {
         var t = Consume();

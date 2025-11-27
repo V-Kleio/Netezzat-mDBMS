@@ -5,35 +5,34 @@ namespace mDBMS.QueryProcessor.Transaction
 {
     internal class BeginTransactionHandler : IQueryHandler
     {
-        private readonly QueryProcessor _processor;
         private readonly IConcurrencyControlManager _concurrencyControlManager;
 
-        public BeginTransactionHandler(QueryProcessor processor, IConcurrencyControlManager concurrencyControlManager)
+        public BeginTransactionHandler(IConcurrencyControlManager concurrencyControlManager)
         {
-            _processor = processor;
             _concurrencyControlManager = concurrencyControlManager;
         }
 
-        public ExecutionResult HandleQuery(string query)
+        public ExecutionResult HandleQuery(string query, int transactionId)
         {
-            if (_processor.ActiveTransactionId.HasValue)
+            if (transactionId != -1)
             {
                 return new ExecutionResult()
                 {
                     Query = query,
                     Success = false,
-                    Message = $"Transaksi sudah aktif dengan ID {_processor.ActiveTransactionId.Value}.",
-                    TransactionId = _processor.ActiveTransactionId.Value
+                    Message = $"Transaksi sudah aktif dengan ID {transactionId}.",
+                    TransactionId = transactionId
                 };
             }
 
-            _processor.ActiveTransactionId = _concurrencyControlManager.BeginTransaction();
+            transactionId = _concurrencyControlManager.BeginTransaction();
+
             return new ExecutionResult()
             {
                 Query = query,
                 Success = true,
-                Message = $"Transaksi baru dimulai dengan ID {_processor.ActiveTransactionId.Value}.",
-                TransactionId = _processor.ActiveTransactionId.Value
+                Message = $"Transaksi baru dimulai dengan ID {transactionId}.",
+                TransactionId = transactionId
             };
         }
     }

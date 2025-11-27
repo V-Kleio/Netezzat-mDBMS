@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.Transaction;
 
@@ -60,119 +59,95 @@ public class TransactionState
 /// </summary>
 public class ConcurrencyControlManager : IConcurrencyControlManager
 {
-    private int _nextTransactionId = 1;
-    private readonly object _lockObject = new();
-
-    // Menyimpan state transaksi
-    private readonly ConcurrentDictionary<int, TransactionState> _transactions;
-
-    // Lock table: key = object identifier, value = list of locks pada object tersebut
-    private readonly ConcurrentDictionary<string, List<Lock>> _lockTable;
-
-    public ConcurrencyControlManager()
+    private readonly IConcurrencyControlManager _protocolManager;
+    private readonly ConcurrencyProtocol _protocol;
+    
+    /// <summary>
+    /// Konstruktor dengan pemilihan protocol
+    /// </summary>
+    /// <param name="protocol">Protocol yang akan digunakan</param>
+    public ConcurrencyControlManager(ConcurrencyProtocol protocol = ConcurrencyProtocol.TwoPhaseeLocking)
     {
         _transactions = new ConcurrentDictionary<int, TransactionState>();
         _lockTable = new ConcurrentDictionary<string, List<Lock>>();
         Console.WriteLine("[CCM] ConcurrencyControlManager initialized with Two-Phase Locking Protocol");
     }   
 
+        _protocol = protocol;
+        
+        // Factory pattern: buat manager sesuai protocol yang dipilih
+        _protocolManager = protocol switch
+        {
+            ConcurrencyProtocol.TwoPhaseeLocking => new TwoPhaseeLockingManager(),
+            ConcurrencyProtocol.TimestampOrdering => new TimestampOrderingManager(),
+            ConcurrencyProtocol.OptimisticValidation => new OptimisticConcurrencyManager(),
+            _ => throw new ArgumentException($"Unknown protocol: {protocol}")
+        };
+        
+        Console.WriteLine($"[CCM] ConcurrencyControlManager initialized with protocol: {protocol}");
+    }
+    
+    /// <summary>
+    /// Get current protocol being used
+    /// </summary>
+    public ConcurrencyProtocol GetProtocol() => _protocol;
+    
     /// <summary>
     /// Memulai transaksi baru
     /// </summary>
     public int BeginTransaction()
     {
-        lock (_lockObject)
-        {
-            int transactionId = Interlocked.Increment(ref _nextTransactionId);
-            var txnState = new TransactionState(transactionId);
-            _transactions.TryAdd(transactionId, txnState);
-
-            Console.WriteLine($"[CCM] Transaction T{transactionId} STARTED (Growing Phase)");
-            return transactionId;
-        }
+        return _protocolManager.BeginTransaction();
     }
-
+    
     /// <summary>
-    /// Memvalidasi apakah aksi pada objek diizinkan menggunakan 2PL
+    /// Memvalidasi apakah aksi pada objek diizinkan
     /// </summary>
     public Response ValidateObject(Common.Transaction.Action action)
     {
-        Console.WriteLine($"[CCM] ValidateObject - T{action.TransactionId}: {action.Type} on {action.DatabaseObject.ToQualifiedString()}");
-
-        if (!_transactions.TryGetValue(action.TransactionId, out var txnState))
-        {
-            Console.WriteLine($"[CCM] ERROR: Transaction T{action.TransactionId} not found");
-            return Response.CreateDenied(action.TransactionId, "Transaction not found", action.DatabaseObject, action.Type);
-        }
-
-        if (txnState.Status != TransactionStatus.Active)
-        {
-            Console.WriteLine($"[CCM] ERROR: Transaction T{action.TransactionId} is not active (Status: {txnState.Status})");
-            return Response.CreateDenied(action.TransactionId, $"Transaction is {txnState.Status}", action.DatabaseObject, action.Type);
-        }
-
-        // Tipe lock yang dibutuhkan berdasarkan action type
-        LockType requiredLockType = action.Type == Common.Transaction.Action.ActionType.Read 
-            ? LockType.Shared 
-            : LockType.Exclusive;
-
-        // Acquire lock
-        return AcquireLock(action.TransactionId, action.DatabaseObject, requiredLockType, action.Type);
+        return _protocolManager.ValidateObject(action);
     }
-
+    
+    /// <summary>
+    /// Mencatat (log) sebuah objek pada transaksi tertentu
+    /// </summary>
+    public void LogObject(DatabaseObject obj, int transactionId)
+    {
+        _protocolManager.LogObject(obj, transactionId);
+    }
+    
     /// <summary>
     /// Mengakhiri transaksi (commit atau abort)
     /// </summary>
     public bool EndTransaction(int transactionId, bool commit)
     {
-        Console.WriteLine($"[CCM] EndTransaction - T{transactionId} ({(commit ? "COMMIT" : "ABORT")})");
-
-        if (!_transactions.TryGetValue(transactionId, out var txnState))
-        {
-            Console.WriteLine($"[CCM] ERROR: Transaction T{transactionId} not found");
-            return false;
-        }
-
-        // Masuk ke shrinking phase dan release semua locks
-        txnState.InGrowingPhase = false;
-        ReleaseAllLocks(transactionId);
-
-        // Update status transaksi
-        var newStatus = commit ? TransactionStatus.Committed : TransactionStatus.Aborted;
-        txnState.Status = newStatus;
-
-        Console.WriteLine($"[CCM] Transaction T{transactionId} {(commit ? "COMMITTED" : "ABORTED")} - All locks released");
-        return true;
+        return _protocolManager.EndTransaction(transactionId, commit);
     }
-
+    
     /// <summary>
     /// Abort transaksi
     /// </summary>
     public bool AbortTransaction(int transactionId)
     {
-        return EndTransaction(transactionId, commit: false);
+        return _protocolManager.AbortTransaction(transactionId);
     }
-
+    
     /// <summary>
     /// Commit transaksi
     /// </summary>
     public bool CommitTransaction(int transactionId)
     {
-        return EndTransaction(transactionId, commit: true);
+        return _protocolManager.CommitTransaction(transactionId);
     }
-
+    
     /// <summary>
     /// Mendapatkan status transaksi
     /// </summary>
     public TransactionStatus GetTransactionStatus(int transactionId)
     {
-        if (_transactions.TryGetValue(transactionId, out var txnState))
-        {
-            return txnState.Status;
-        }
-        return TransactionStatus.Aborted;
+        return _protocolManager.GetTransactionStatus(transactionId);
     }
-
+    
     /// <summary>
     /// Memeriksa apakah transaksi aktif
     /// </summary>
