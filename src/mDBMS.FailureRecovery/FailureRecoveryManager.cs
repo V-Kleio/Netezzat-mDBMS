@@ -433,7 +433,7 @@ namespace mDBMS.FailureRecovery
                 Console.WriteLine($"[FRM UNDO]: Executing: {undoQuery}");
 
                 // Execute undo query via Query Processor
-                var result = _queryProcessor.ExecuteQuery(undoQuery);
+                var result = _queryProcessor.ExecuteQuery(undoQuery, -1);
 
                 if (result.Success)
                 {
