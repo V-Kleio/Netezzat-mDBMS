@@ -1,3 +1,5 @@
+using mDBMS.Common.Data;
+
 namespace mDBMS.Common.QueryData;
 
 /// <summary>
@@ -15,7 +17,7 @@ public sealed class FilterNode : PlanNode
     /// Kondisi boolean yang harus dipenuhi.
     /// Baris yang menghasilkan false akan dibuang.
     /// </summary>
-    public string Condition { get; set; } = string.Empty;
+    public IEnumerable<Condition> Conditions { get; set; }
 
     /// <summary>
     /// Total cost = node cost + input cost.
@@ -23,25 +25,12 @@ public sealed class FilterNode : PlanNode
     public override double TotalCost => NodeCost + Input.TotalCost;
 
     public override string OperationName => "FILTER";
-    public override string Details => $"WHERE {Condition}";
+    public override string Details => $"WHERE {Conditions}";
 
-    public FilterNode(PlanNode input, string condition)
+    public FilterNode(PlanNode input, IEnumerable<Condition> conditions)
     {
         Input = input;
-        Condition = condition;
-    }
-
-    public override List<QueryPlanStep> ToSteps()
-    {
-        var steps = Input.ToSteps();
-        steps.Add(new QueryPlanStep
-        {
-            Order = steps.Count + 1,
-            Operation = OperationType.FILTER,
-            Description = Details,
-            EstimatedCost = NodeCost
-        });
-        return steps;
+        Conditions = conditions;
     }
 }
 
@@ -75,19 +64,6 @@ public sealed class ProjectNode : PlanNode
         Input = input;
         Columns = columns;
     }
-
-    public override List<QueryPlanStep> ToSteps()
-    {
-        var steps = Input.ToSteps();
-        steps.Add(new QueryPlanStep
-        {
-            Order = steps.Count + 1,
-            Operation = OperationType.PROJECTION,
-            Description = Details,
-            EstimatedCost = NodeCost
-        });
-        return steps;
-    }
 }
 
 /// <summary>
@@ -119,19 +95,6 @@ public sealed class SortNode : PlanNode
         Input = input;
         OrderBy = orderBy;
     }
-
-    public override List<QueryPlanStep> ToSteps()
-    {
-        var steps = Input.ToSteps();
-        steps.Add(new QueryPlanStep
-        {
-            Order = steps.Count + 1,
-            Operation = OperationType.SORT,
-            Description = Details,
-            EstimatedCost = NodeCost
-        });
-        return steps;
-    }
 }
 
 /// <summary>
@@ -161,18 +124,5 @@ public sealed class AggregateNode : PlanNode
     {
         Input = input;
         GroupBy = groupBy;
-    }
-
-    public override List<QueryPlanStep> ToSteps()
-    {
-        var steps = Input.ToSteps();
-        steps.Add(new QueryPlanStep
-        {
-            Order = steps.Count + 1,
-            Operation = OperationType.AGGREGATION,
-            Description = Details,
-            EstimatedCost = NodeCost
-        });
-        return steps;
     }
 }

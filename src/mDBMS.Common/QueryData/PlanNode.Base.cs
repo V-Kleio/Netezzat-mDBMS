@@ -51,19 +51,12 @@ public abstract class PlanNode
     }
 
     /// <summary>
-    /// Konversi tree menjadi flat list of QueryPlanStep untuk compatibility dengan QueryProcessor.
-    /// Steps dibuat dalam urutan depth-first (bottom-up).
-    /// </summary>
-    public abstract List<QueryPlanStep> ToSteps();
-
-    /// <summary>
     /// Konversi node tree menjadi QueryPlan untuk interface IQueryOptimizer.
     /// </summary>
     public QueryPlan ToQueryPlan()
     {
         return new QueryPlan
         {
-            Steps = ToSteps(),
             TotalEstimatedCost = TotalCost,
             EstimatedRows = (int)EstimatedRows,
             Strategy = OptimizerStrategy.COST_BASED
