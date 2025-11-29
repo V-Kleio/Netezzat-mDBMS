@@ -1,3 +1,5 @@
+using mDBMS.Common.Data;
+
 namespace mDBMS.Common.QueryData;
 
 /// <summary>
@@ -18,21 +20,6 @@ public sealed class TableScanNode : PlanNode
 
     public override string OperationName => "TABLE_SCAN";
     public override string Details => $"Table: {TableName}";
-
-    public override List<QueryPlanStep> ToSteps()
-    {
-        return new List<QueryPlanStep>
-        {
-            new QueryPlanStep
-            {
-                Order = 1,
-                Operation = OperationType.TABLE_SCAN,
-                Table = TableName, // UseTable untuk scan
-                Description = Details,
-                EstimatedCost = NodeCost
-            }
-        };
-    }
 }
 
 /// <summary>
@@ -51,22 +38,6 @@ public sealed class IndexScanNode : PlanNode
 
     public override string OperationName => "INDEX_SCAN";
     public override string Details => $"Table: {TableName}, Index: {IndexColumn}";
-
-    public override List<QueryPlanStep> ToSteps()
-    {
-        return new List<QueryPlanStep>
-        {
-            new QueryPlanStep
-            {
-                Order = 1,
-                Operation = OperationType.INDEX_SCAN,
-                Table = TableName, // UseTable untuk scan
-                IndexUsed = IndexColumn,
-                Description = Details,
-                EstimatedCost = NodeCost
-            }
-        };
-    }
 }
 
 /// <summary>
@@ -82,7 +53,7 @@ public sealed class IndexSeekNode : PlanNode
     /// Kondisi pencarian yang akan dievaluasi menggunakan index.
     /// Contoh: "age > 25", "id = 100"
     /// </summary>
-    public string SeekCondition { get; set; } = string.Empty;
+    public IEnumerable<Condition> SeekCondition { get; set; }
 
     /// <summary>
     /// Leaf node tidak punya children, total cost = node cost saja.
@@ -91,20 +62,4 @@ public sealed class IndexSeekNode : PlanNode
 
     public override string OperationName => "INDEX_SEEK";
     public override string Details => $"Table: {TableName}, Index: {IndexColumn}, Seek: {SeekCondition}";
-
-    public override List<QueryPlanStep> ToSteps()
-    {
-        return new List<QueryPlanStep>
-        {
-            new QueryPlanStep
-            {
-                Order = 1,
-                Operation = OperationType.INDEX_SEEK,
-                Table = TableName, // UseTable untuk seek
-                IndexUsed = IndexColumn,
-                Description = Details,
-                EstimatedCost = NodeCost
-            }
-        };
-    }
 }

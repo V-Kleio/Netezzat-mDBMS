@@ -2,6 +2,8 @@ namespace mDBMS.Common.Data;
 
 public class Row
 {
+    public string id;
+
     public Dictionary<string, object> Columns { get; set; } = new();
 
     public object this[string key]

@@ -19,11 +19,25 @@ namespace mDBMS.Common.Interfaces
         int WriteBlock(DataWrite data_write);
 
         /// <summary>
+        /// Menulis baris data baru pada tabel
+        /// </summary>
+        /// <param name="data_write">Objek yang berisi data yang akan ditulis atau diperbarui</param>
+        /// <returns>Jumlah baris yang berhasil ditulis atau diperbarui</returns>
+        int AddBlock(DataWrite data_write);
+
+        /// <summary>
         /// Menghapus satu atau beberapa baris data dari tabel sesuai kondisi pada data_deletion
         /// </summary>
         /// <param name="data_deletion">Objek yang berisi kondisi untuk penghapusan data</param>
         /// <returns>Jumlah baris yang berhasil dihapus</returns>
         int DeleteBlock(DataDeletion data_deletion);
+
+        /// <summary>
+        /// Menulis atau memperbarui satu atau beberapa baris data pada tabel sesuai kondisi pada data_write
+        /// </summary>
+        /// <param name="data_write">Objek yang berisi data yang akan ditulis atau diperbarui dan kondisinya</param>
+        /// <returns>Jumlah baris yang berhasil ditulis atau diperbarui</returns>
+        int WriteDisk(Page page);
 
         /// <summary>
         /// Mengatur atau membuat indeks pada kolom tertentu di tabel

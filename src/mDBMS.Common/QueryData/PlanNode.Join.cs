@@ -1,3 +1,5 @@
+using mDBMS.Common.Data;
+
 namespace mDBMS.Common.QueryData;
 
 /// <summary>
@@ -24,7 +26,7 @@ public sealed class JoinNode : PlanNode
     /// Kondisi join (ON clause).
     /// Contoh: "e.dept_id = d.id"
     /// </summary>
-    public string JoinCondition { get; set; } = string.Empty;
+    public Condition JoinCondition { get; set; }
 
     /// <summary>
     /// Algoritma yang digunakan untuk join.
@@ -39,46 +41,12 @@ public sealed class JoinNode : PlanNode
     public override string OperationName => $"{JoinType}_JOIN ({Algorithm})";
     public override string Details => $"ON {JoinCondition}";
 
-    public JoinNode(PlanNode left, PlanNode right, JoinType joinType, string condition)
+    public JoinNode(PlanNode left, PlanNode right, JoinType joinType, Condition condition)
     {
         Left = left;
         Right = right;
         JoinType = joinType;
         JoinCondition = condition;
-    }
-
-    public override List<QueryPlanStep> ToSteps()
-    {
-        // Gabungkan steps dari kedua children
-        var leftSteps = Left.ToSteps();
-        var rightSteps = Right.ToSteps();
-
-        // Renumber right steps
-        foreach (var step in rightSteps)
-        {
-            step.Order += leftSteps.Count;
-        }
-
-        var allSteps = new List<QueryPlanStep>();
-        allSteps.AddRange(leftSteps);
-        allSteps.AddRange(rightSteps);
-
-        // Tambahkan join step
-        allSteps.Add(new QueryPlanStep
-        {
-            Order = allSteps.Count + 1,
-            Operation = Algorithm switch
-            {
-                JoinAlgorithm.NestedLoop => OperationType.NESTED_LOOP_JOIN,
-                JoinAlgorithm.Hash => OperationType.HASH_JOIN,
-                JoinAlgorithm.Merge => OperationType.MERGE_JOIN,
-                _ => OperationType.NESTED_LOOP_JOIN
-            },
-            Description = Details,
-            EstimatedCost = NodeCost
-        });
-
-        return allSteps;
     }
 }
 
