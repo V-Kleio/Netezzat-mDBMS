@@ -9,7 +9,7 @@ namespace mDBMS.FailureRecovery
 {
     public class FailureRecoveryManager : IFailureRecoveryManager, IBufferManager
     {
-        private readonly mDBMS.Common.Data.BufferPool _bufferPool;
+        private readonly BufferPool _bufferPool;
 
         private IQueryProcessor? _queryProcessor;
         private IStorageManager? _storageManager;
@@ -19,11 +19,11 @@ namespace mDBMS.FailureRecovery
         private long _currentLSN;
         private readonly object _logLock = new object();
 
-        private LogEntry[] logBuffer = new LogEntry[0];
+        private List<LogEntry> _logBuffer = new List<LogEntry>();
 
         public FailureRecoveryManager(IQueryProcessor? queryProcessor = null, IStorageManager? storageManager = null)
         {
-            _bufferPool = new mDBMS.Common.Data.BufferPool();
+            _bufferPool = new BufferPool();
 
             _queryProcessor = queryProcessor;
             _storageManager = storageManager;
@@ -61,17 +61,23 @@ namespace mDBMS.FailureRecovery
                     LSN = _currentLSN,
                     Timestamp = DateTime.Now,
                     TransactionId = info.TransactionId,
-                    OperationType = info.Operation,
+                    OperationType = MapOperationType(info.Operation),  // Convert ExecutionLog.OperationType → LogOperationType
                     TableName = info.TableName,
                     RowIdentifier = info.RowIdentifier,
                     BeforeImage = info.BeforeImage,
                     AfterImage = info.AfterImage
                 };
 
-                File.AppendAllText(_logFilePath, entry.Serialize() + "\n");
+
+                // Nambah ke logBuffer
+
+                _logBuffer.Add(entry);
 
                 _currentLSN++;
 
+                // ! Auto flush (INI TEMPORARY FOR TESTING)
+                // Later flush nya pas: 1. commit, 2. checkpoint, 3. buffer penuh, 4. shutdown graceful
+                File.AppendAllText(_logFilePath, entry.Serialize() + "\n");
             }
         }
 
@@ -158,8 +164,22 @@ namespace mDBMS.FailureRecovery
             }
         }
 
+        public void FlushLogBuffer()
+        {
+            lock (_logLock)
+            {
+                if (_logBuffer.Count == 0) return;
 
-        // Recover up until recover criteria, uses ExecuteRecoveryQuery
+                foreach (var entry in _logBuffer)
+                {
+                    File.AppendAllText(_logFilePath, entry.Serialize() + "\n");
+                }
+
+                _logBuffer.Clear();
+            }
+        }
+
+        //! (INI BONUS, belom dipake, need REDO) Recover up until recover criteria, uses ExecuteRecoveryQuery
         public void Recover(RecoverCriteria criteria)
         {
             Console.WriteLine($"[FRM RECOVER]: Memulai recovery untuk TransactionId={criteria.TransactionId}, Timestamp={criteria.Timestamp}");
@@ -313,6 +333,7 @@ namespace mDBMS.FailureRecovery
             }
         }
 
+
         /// <summary>
         /// Flush page ke disk via Storage Manager
         /// </summary>
@@ -326,13 +347,8 @@ namespace mDBMS.FailureRecovery
 
             try
             {
-                // TODO (SM): Convert Page object ke DataWrite format yang sesuai untuk SM
-                // Contoh implementasi:
-                // var dataWrite = ConvertPageToDataWrite(page);
-                // int result = _storageManager.WriteBlock(dataWrite);
-                // return result > 0;
+                // TODO (SM): panggil WriteToDisk punya SM
 
-                // Sementara return false karena belum terintegrasi
                 return false;
             }
             catch (Exception ex)
@@ -341,6 +357,8 @@ namespace mDBMS.FailureRecovery
                 return false;
             }
         }
+
+
 
         /// <summary>
         /// Ambil daftar transaksi yang masih aktif (belum COMMIT/ABORT)
@@ -591,38 +609,53 @@ namespace mDBMS.FailureRecovery
             return entries;
         }
 
+
         /// <summary>
-        /// ekstrak nama tabel dari query string (simple parser)
+        /// Map dari ExecutionLog.OperationType (enum dari QP) ke LogOperationType (enum di FRM)
         /// </summary>
-        private string? ExtractTableNameFromQuery(string query)
+        private LogOperationType MapOperationType(ExecutionLog.OperationType operation)
         {
-            if (string.IsNullOrWhiteSpace(query))
-                return null;
-
-            var tokens = query.Trim().Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-
-            // INSERT INTO table_name ...
-            if (tokens.Length > 2 && tokens[0].Equals("INSERT", StringComparison.OrdinalIgnoreCase)
-                && tokens[1].Equals("INTO", StringComparison.OrdinalIgnoreCase))
+            return operation switch
             {
-                return tokens[2];
-            }
-
-            // UPDATE table_name ...
-            if (tokens.Length > 1 && tokens[0].Equals("UPDATE", StringComparison.OrdinalIgnoreCase))
-            {
-                return tokens[1];
-            }
-
-            // DELETE FROM table_name ...
-            if (tokens.Length > 2 && tokens[0].Equals("DELETE", StringComparison.OrdinalIgnoreCase)
-                && tokens[1].Equals("FROM", StringComparison.OrdinalIgnoreCase))
-            {
-                return tokens[2];
-            }
-
-            return null;
+                ExecutionLog.OperationType.INSERT => LogOperationType.INSERT,
+                ExecutionLog.OperationType.UPDATE => LogOperationType.UPDATE,
+                ExecutionLog.OperationType.DELETE => LogOperationType.DELETE,
+                _ => throw new ArgumentException($"Unknown operation type: {operation}", nameof(operation))
+            };
         }
+
+        private LogOperationType ParseOperationType(string operation)
+        {
+            if (string.IsNullOrWhiteSpace(operation))
+            {
+                throw new ArgumentException("Operation type cannot be null or empty", nameof(operation));
+            }
+
+            return operation.ToUpperInvariant() switch
+            {
+                "INSERT" => LogOperationType.INSERT,
+                "UPDATE" => LogOperationType.UPDATE,
+                "DELETE" => LogOperationType.DELETE,
+                "BEGIN" => LogOperationType.BEGIN_TRANSACTION,
+                "COMMIT" => LogOperationType.COMMIT,
+                "ROLLBACK" => LogOperationType.ABORT,
+                "ABORT" => LogOperationType.ABORT,
+
+                // Alias/alternatif
+                "BEGIN TRANSACTION" => LogOperationType.BEGIN_TRANSACTION,
+                "COMMIT TRANSACTION" => LogOperationType.COMMIT,
+                "ROLLBACK TRANSACTION" => LogOperationType.ABORT,
+
+                // Checkpoint
+                "CHECKPOINT" => LogOperationType.CHECKPOINT,
+                "END CHECKPOINT" => LogOperationType.END_CHECKPOINT,
+                "END_CHECKPOINT" => LogOperationType.END_CHECKPOINT,
+
+                _ => throw new ArgumentException($"Unknown operation type: {operation}", nameof(operation))
+            };
+        }
+
+
 
         /// <summary>
         /// serialize row data menjadi string format JSON-like
