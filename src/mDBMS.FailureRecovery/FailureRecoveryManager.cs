@@ -301,7 +301,7 @@ namespace mDBMS.FailureRecovery
                     }
 
                     // 3. Flush buffer (kosongkan)
-                    var remainingDirtyPages = _bufferPool.FlushAll();
+                    var remainingDirtyPages = _bufferPool.FlushDirties();
 
                     if (remainingDirtyPages.Count > 0)
                     {
@@ -341,21 +341,19 @@ namespace mDBMS.FailureRecovery
         {
             if (_storageManager == null)
             {
-                // TODO (SM): Integrate dengan Storage Manager
                 return false;
             }
 
             try
             {
-                // TODO (SM): panggil WriteToDisk punya SM
-
-                return false;
+                return _storageManager.WriteDisk(page) == 1;
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[FRM]: Gagal flush page {page.TableName}-{page.BlockID} - {ex.Message}");
+                Console.Error.WriteLine($"Gagal flush page {page.TableName}-{page.BlockID} - {ex.Message}");
                 return false;
             }
+            return false;
         }
 
 
@@ -749,7 +747,12 @@ namespace mDBMS.FailureRecovery
 
         public List<Page> FlushAll()
         {
-            return _bufferPool.FlushAll();
+            List<Page> buffers = _bufferPool.FlushDirties();
+            foreach (var page in buffers)
+            {
+                FlushPageToDisk(page);
+            }
+            return buffers;
         }
 
     }
