@@ -106,4 +106,24 @@ public interface ICostModel
     /// <param name="blockSize">Ukuran blok penyimpanan (untuk menghitung I/O)</param>
     /// <returns>Estimated cost</returns>
     double EstimateUpdate(double affectedRows, double blockSize, int indexCount = 0);
+
+    /// <summary>
+    /// Estimasi cost untuk opperasi INSERT
+    /// </summary>
+    /// <param name="rowCount">Jumlah baris yang diinsert</param>
+    /// <param name="columnCount">Jumlah kolom per baris (memengaruhi blok penyimpanan)</param>
+    /// <param name="indexCount">Jumlah index yang perlu diupdate</param>
+    /// <param name="hasConstraints">Foreign key, unique, check constraints</param>
+    /// <returns>Estimated cost</returns>
+    double EstimateInsert(double rowCount, int columnCount, int indexCount = 0, bool hasConstraints = false);
+
+    /// <summary>
+    /// Estimasi cost untuk operasi DELETE.
+    /// </summary>
+    /// <param name="affectedRows">Jumlah baris yang akan didelete</param>
+    /// <param name="blockingFactor">Jumlah baris per blok penyimpanan</param>
+    /// <param name="indexCount">Jumlah index yang perlu dimaintain</param>
+    /// <param name="hasCascade">Apakah ada foreign key cascade delete</param>
+    /// <returns>Estimated cost</returns>
+    double EstimatedDelete(double affectedRows, double blockingFactor, int indexCount = 0, bool hasCascade = false);
 }
