@@ -4,41 +4,17 @@ namespace mDBMS.Common.Interfaces
 {
     public interface IStorageManager
     {
-        /// <summary>
-        /// Membaca satu atau beberapa baris data dari tabel sesuai kondisi pada data_retrieval
-        /// </summary>
-        /// <param name="data_retrieval">Objek yang berisi kondisi untuk pembacaan data</param>
-        /// <returns>Daftar baris yang dibaca dari tabel sesuai kondisi</returns>
-        IEnumerable<Row> ReadBlock(DataRetrieval data_retrieval);
+        // FailureRecoveryManager.ReadFromBuffer(string tableName,int blockId)
+        IEnumerable<Row> ReadBlock(DataRetrieval data_retrieval); // KE BUFFER FALLBACK KE DISK
 
-        /// <summary>
-        /// Menulis atau memperbarui satu atau beberapa baris data pada tabel sesuai kondisi pada data_write
-        /// </summary>
-        /// <param name="data_write">Objek yang berisi data yang akan ditulis atau diperbarui dan kondisinya</param>
-        /// <returns>Jumlah baris yang berhasil ditulis atau diperbarui</returns>
-        int WriteBlock(DataWrite data_write);
+        // FailureRecoveryManager.WriteToBuffer(Page page)
+        int WriteBlock(DataWrite data_write); // KE BUFFER
+        int AddBlock(DataWrite data_write); // KE BUFFER 
+        int DeleteBlock(DataDeletion data_deletion); // KE BUFFER
 
-        /// <summary>
-        /// Menulis baris data baru pada tabel
-        /// </summary>
-        /// <param name="data_write">Objek yang berisi data yang akan ditulis atau diperbarui</param>
-        /// <returns>Jumlah baris yang berhasil ditulis atau diperbarui</returns>
-        int AddBlock(DataWrite data_write);
-
-        /// <summary>
-        /// Menghapus satu atau beberapa baris data dari tabel sesuai kondisi pada data_deletion
-        /// </summary>
-        /// <param name="data_deletion">Objek yang berisi kondisi untuk penghapusan data</param>
-        /// <returns>Jumlah baris yang berhasil dihapus</returns>
-        int DeleteBlock(DataDeletion data_deletion);
-
-        /// <summary>
-        /// Menulis atau memperbarui satu atau beberapa baris data pada tabel sesuai kondisi pada data_write
-        /// </summary>
-        /// <param name="data_write">Objek yang berisi data yang akan ditulis atau diperbarui dan kondisinya</param>
-        /// <returns>Jumlah baris yang berhasil ditulis atau diperbarui</returns>
-        int WriteDisk(Page page);
-
+        /// FRM MANGGGIL BUAT FLUSH(INSERT UPDATE DELETE)
+        int WriteDisk(Page page); // KE DISK
+        
         /// <summary>
         /// Mengatur atau membuat indeks pada kolom tertentu di tabel
         /// </summary>

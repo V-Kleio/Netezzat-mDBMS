@@ -388,3 +388,18 @@ namespace mDBMS.StorageManager
         }
     }
 }
+
+
+// INSERT UPDATE DELETE KE BUFFER
+// FRM -> FailureRecoveryManager.WriteToBuffer(Page page)
+// sm -> invoke FRM
+
+// READ KE BUFFER (fallback write ke disk kalo gada (Array.Empty<byte>()))
+// FRM -> FailureRecoveryManager.ReadFromBuffer(string tableName,int blockId)
+// Sm -> ReadBlock() {FailureRecoveryManager.ReadFromBuffer(string,int)}
+
+// WRITE / UPDATE / DELETE KE DISK (FIX)
+// FRM -> flushBuffer(Page) {SM.WriteDisk(Page)}
+// Sm ->  void WriteDisk(Page)
+
+// Sm -> invoke readfrombuffer kalo mau read 
