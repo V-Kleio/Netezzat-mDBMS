@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using mDBMS.Common.Data; // Pastikan using ini ada untuk akses Row
+using System.IO; 
+using mDBMS.Common.Data;
 
 namespace mDBMS.StorageManager
 {
@@ -9,69 +10,83 @@ namespace mDBMS.StorageManager
     {
         public static byte[] SerializeRow(TableSchema schema, Row row)
         {
-            var buffer = new List<byte>();
 
-            foreach (var col in schema.Columns)
+            using (var ms = new MemoryStream())
+            using (var writer = new BinaryWriter(ms))
             {
-                // Ambil value, jika tidak ada default ke null/0
-                object? value = row.Columns.ContainsKey(col.Name) ? row[col.Name] : null;
+                string rowId = row.id ?? Guid.NewGuid().ToString(); 
+                writer.Write(rowId);
 
-                switch (col.Type)
+                foreach (var col in schema.Columns)
                 {
-                    case DataType.Int:
-                        int intVal = value is int i ? i : 0;
-                        buffer.AddRange(BitConverter.GetBytes(intVal));
-                        break;
+                    object? value = row.Columns.ContainsKey(col.Name) ? row[col.Name] : null;
 
-                    case DataType.Float: // TAMBAHAN: Support Float (GPA)
-                        float floatVal = value is float f ? f : 0.0f;
-                        // Jika input double (dari JSON/C# default), cast ke float
-                        if (value is double d) floatVal = (float)d;
-                        buffer.AddRange(BitConverter.GetBytes(floatVal));
-                        break;
+                    switch (col.Type)
+                    {
+                        case DataType.Int:
+                            int intVal = value is int i ? i : 0;
+                            writer.Write(intVal);
+                            break;
 
-                    case DataType.String:
-                        string strVal = value as string ?? string.Empty;
-                        // Potong jika kepanjangan, atau biarkan jika pas
-                        if (strVal.Length > col.Length) strVal = strVal.Substring(0, col.Length);
-                        
-                        var strBytes = new byte[col.Length]; // Array otomatis terisi 0 (padding)
-                        Encoding.ASCII.GetBytes(strVal).CopyTo(strBytes, 0);
-                        buffer.AddRange(strBytes);
-                        break;
+                        case DataType.Float:
+                            float floatVal = value is float f ? f : 0.0f;
+                            if (value is double d) floatVal = (float)d;
+                            writer.Write(floatVal);
+                            break;
+
+                        case DataType.String:
+                            string strVal = value as string ?? string.Empty;
+                            if (strVal.Length > col.Length) strVal = strVal.Substring(0, col.Length);
+                            
+                            byte[] strBytes = new byte[col.Length];
+                            Encoding.ASCII.GetBytes(strVal).CopyTo(strBytes, 0);
+                            writer.Write(strBytes);
+                            break;
+                    }
                 }
+
+                return ms.ToArray();
             }
-            return buffer.ToArray();
         }
 
         public static Row DeserializeRow(TableSchema schema, byte[] data)
         {
-            var row = new Row();
-            int offset = 0;
-
-            foreach (var col in schema.Columns)
+            using (var ms = new MemoryStream(data))
+            using (var reader = new BinaryReader(ms))
             {
-                switch (col.Type)
+                var row = new Row();
+
+                try 
                 {
-                    case DataType.Int:
-                        row[col.Name] = BitConverter.ToInt32(data, offset);
-                        offset += 4;
-                        break;
-
-                    case DataType.Float: // TAMBAHAN: Support Float
-                        row[col.Name] = BitConverter.ToSingle(data, offset);
-                        offset += 4;
-                        break;
-
-                    case DataType.String:
-                        // Baca sepanjang col.Length
-                        string str = Encoding.ASCII.GetString(data, offset, col.Length);
-                        row[col.Name] = str.TrimEnd('\0'); // Hapus padding null
-                        offset += col.Length;
-                        break;
+                    row.id = reader.ReadString();
                 }
+                catch
+                {
+
+                    row.id = Guid.NewGuid().ToString();
+                }
+
+                foreach (var col in schema.Columns)
+                {
+                    switch (col.Type)
+                    {
+                        case DataType.Int:
+                            row[col.Name] = reader.ReadInt32();
+                            break;
+
+                        case DataType.Float:
+                            row[col.Name] = reader.ReadSingle();
+                            break;
+
+                        case DataType.String:
+                            byte[] strBytes = reader.ReadBytes(col.Length);
+                            string str = Encoding.ASCII.GetString(strBytes);
+                            row[col.Name] = str.TrimEnd('\0');
+                            break;
+                    }
+                }
+                return row;
             }
-            return row;
         }
     }
 }
