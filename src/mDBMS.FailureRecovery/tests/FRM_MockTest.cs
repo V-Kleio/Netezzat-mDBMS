@@ -274,11 +274,7 @@ namespace mDBMS.FailureRecovery
                 var frm = new FailureRecoveryManager();
 
                 // Create test page
-                var testPage = new Page("TestTable", 1)
-                {
-                    Data = new byte[4096],
-                    IsDirty = true
-                };
+                var testPage = new Page("TestTable", 1, new byte[4096], true);
 
                 // Fill dengan test data
                 for (int i = 0; i < 100; i++)

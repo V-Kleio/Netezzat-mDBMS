@@ -12,18 +12,23 @@ namespace mDBMS.StorageManager
         private static readonly string DataPath = AppDomain.CurrentDomain.BaseDirectory;
         private const int BlockSize = 4096;
         private const int FileHeaderSize = 4096;
-        
-        private readonly Dictionary<string, HashIndex> _activeIndexes = new(); 
 
-        public StorageEngine() { }
+        private readonly Dictionary<string, HashIndex> _activeIndexes = new();
+        private readonly IBufferManager? _bufferManager;
 
+        public StorageEngine(IBufferManager? bufferManager = null)
+        {
+            _bufferManager = bufferManager;
+        }
+
+        // Write dari buffer ke disk
         public int WriteDisk(Page page)
         {
             string fileName = $"{page.TableName.ToLower()}.dat";
             string fullPath = Path.Combine(DataPath, fileName);
-            
-            
-            try 
+
+
+            try
             {
                 using (var fs = new FileStream(fullPath, FileMode.OpenOrCreate, FileAccess.Write))
                 {
@@ -40,75 +45,106 @@ namespace mDBMS.StorageManager
             }
         }
 
+        // Ini INSERT block
         public int AddBlock(DataWrite data_write)
         {
             string tableName = data_write.Table;
             string fileName = $"{tableName.ToLower()}.dat";
             string fullPath = Path.Combine(DataPath, fileName);
-            
-            if (!File.Exists(fullPath)) return 0; 
+
+            if (!File.Exists(fullPath)) return 0;
 
             TableSchema? schema = GetSchemaFromFile(fileName);
             if (schema == null) return 0;
 
             // Buat Row Baru dari NewValues
-            Row rowObj = new Row(); 
+            Row rowObj = new Row();
             foreach(var kvp in data_write.NewValues) rowObj[kvp.Key] = kvp.Value;
-            
+
             // Pastikan ID ada
             if (string.IsNullOrEmpty(rowObj.id)) rowObj.id = Guid.NewGuid().ToString();
 
-            // Serialize Row
+            // Serialize Row (buat itung ukuran byte)
             byte[] rowData = RowSerializer.SerializeRow(schema, rowObj);
             int rowSize = rowData.Length;
 
+            int targetBlockID = -1;
+            byte[]? targetBuffer = null;
             bool spaceFound = false;
 
-            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.ReadWrite))
+            // Tentukan Loop Limit (Berdasarkan ukuran file di Disk)
+            long fileLength = new FileInfo(fullPath).Length;
+            int totalBlocks = (int)((fileLength - FileHeaderSize) / BlockSize);
+
+            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                // First Fit (Cari celah kosong di blok yang ada)
-                if (fs.Length > FileHeaderSize)
+                for (int i = 0; i < totalBlocks; i++)
                 {
-                    fs.Seek(FileHeaderSize, SeekOrigin.Begin);
-                    byte[] buffer = new byte[BlockSize];
-                    long currentOffset = FileHeaderSize;
+                    byte[] currentBlockData = new byte[BlockSize];
+                    bool isDataFromBuffer = false;
 
-                    while (fs.Read(buffer, 0, BlockSize) > 0)
+                    // Buffer check
+                    if (_bufferManager != null)
                     {
-                        int freeSpace = BlockSerializer.GetFreeSpace(buffer, rowSize);
-                        
-                        if (freeSpace >= rowSize + 2) // +2 untuk header entry directory
+                        byte[] bufferedData = _bufferManager.ReadFromBuffer(tableName, i);
+                        if (bufferedData != null && bufferedData.Length == BlockSize)
                         {
-                            if (BlockSerializer.TryInsertRow(schema, buffer, rowData))
-                            {
-                                // Tulis balik blok yang sudah diupdate
-                                fs.Seek(currentOffset, SeekOrigin.Begin);
-                                fs.Write(buffer, 0, BlockSize);
-                                spaceFound = true;
-                                break; 
-                            }
+                            currentBlockData = bufferedData;
+                            isDataFromBuffer = true;
                         }
-                        currentOffset += BlockSize;
                     }
-                }
 
-                // Jika tidak ada tempat, Append blok baru
-                if (!spaceFound)
-                {
-                    fs.Seek(0, SeekOrigin.End);
-                    var rawRows = new List<byte[]> { rowData };
-                    byte[] newBlock = BlockSerializer.CreateBlock(rawRows);
-                    fs.Write(newBlock, 0, BlockSize); // Tulis full 4KB
+                    // Gada ada di Buffer, baru baca dari Disk
+                    if (!isDataFromBuffer)
+                    {
+                        fs.Seek(FileHeaderSize + (i * BlockSize), SeekOrigin.Begin);
+                        fs.Read(currentBlockData, 0, BlockSize);
+                    }
+
+                    // Inserting row, check free space di block tsbt
+                    int freeSpace = BlockSerializer.GetFreeSpace(currentBlockData, rowSize);
+
+                    if (freeSpace >= 0)
+                    {
+                        if (BlockSerializer.TryInsertRow(schema, currentBlockData, rowData))
+                        {
+                            targetBlockID = i;
+                            targetBuffer = currentBlockData; // Ini sekarang berisi data lama + row baru
+                            spaceFound = true;
+                            break;
+                        }
+                    }
                 }
             }
 
-            // Update Index sepertinya todo
-            // UpdateIndexes(tableName, rowObj, targetBlockOffset);
+            // Jika tidak ada tempat, Append blok baru
+            if (!spaceFound)
+            {
+                // Block ID baru adalah index terakhir (totalBlocks)
+                targetBlockID = totalBlocks;
 
-            return 1;
+                var rawRows = new List<byte[]> { rowData };
+                targetBuffer = BlockSerializer.CreateBlock(rawRows);
+            }
+
+            // Write to buffer (requires buffer manager)
+            if (targetBuffer != null && targetBlockID >= 0)
+            {
+                if (_bufferManager == null)
+                {
+                    Console.Error.WriteLine("[StorageEngine] Buffer manager not initialized!");
+                    return 0;
+                }
+
+                // Write to buffer
+                Page page = new(tableName, targetBlockID, targetBuffer, true);
+                _bufferManager.WriteToBuffer(page);
+                return 1; // success
+            }
+            return 0; // fail
         }
 
-
+        // Ini UPDATE block
         public int WriteBlock(DataWrite data_write)
         {
             string tableName = data_write.Table;
@@ -120,41 +156,42 @@ namespace mDBMS.StorageManager
             if (schema == null) return 0;
 
             int updatedCount = 0;
-            
+
             // Karena update bisa mengubah ukuran baris (misal string jadi lebih panjang),
             // Jika tidak muat di blok lama, kita lakukan Delete -> Insert.
-            
+
+            List<Row> rowsToMigrate = new List<Row>();
+
             // Untuk simplifikasi IO: Kita baca semua, update di memori, tulis balik.
-            
-            var blocks = new List<byte[]>();
-            var blockOffsets = new List<long>();
 
-            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read))
-            {
-                if (fs.Length <= FileHeaderSize) return 0;
-                fs.Seek(FileHeaderSize, SeekOrigin.Begin);
-                
-                byte[] buffer = new byte[BlockSize];
-                long offset = FileHeaderSize;
-                while (fs.Read(buffer, 0, BlockSize) > 0)
-                {
-                    byte[] copy = new byte[BlockSize];
-                    Array.Copy(buffer, copy, BlockSize);
-                    blocks.Add(copy);
-                    blockOffsets.Add(offset);
-                    offset += BlockSize;
-                }
-            }
+            // Tentukan Loop Limit (Berdasarkan ukuran file di Disk)
+            long fileLength = new FileInfo(fullPath).Length;
+            int totalBlocks = (int)((fileLength - FileHeaderSize) / BlockSize);
 
-            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Write))
+            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                for (int i = 0; i < blocks.Count; i++)
+                for (int i = 0; i < totalBlocks; i++)
                 {
-                    byte[] blockData = blocks[i];
-                    List<Row> rows = BlockSerializer.DeserializeBlock(schema, blockData);
+                    byte[] currentBlockData = new byte[BlockSize];
+                    bool isDataFromBuffer = false;
+                    if (_bufferManager != null)
+                    {
+                        byte[] bufferedData = _bufferManager.ReadFromBuffer(tableName, i);
+                        if (bufferedData != null && bufferedData.Length == BlockSize)
+                        {
+                            currentBlockData = bufferedData;
+                            isDataFromBuffer = true;
+                        }
+                    }
+                    // alau gak ada di buffer, baca Disk
+                    if (!isDataFromBuffer)
+                    {
+                        fs.Seek(FileHeaderSize + (i * BlockSize), SeekOrigin.Begin);
+                        fs.Read(currentBlockData, 0, BlockSize);
+                    }
+
+                    List<Row> rows = BlockSerializer.DeserializeBlock(schema, currentBlockData);
                     bool blockModified = false;
-                    List<Row> newRowsForBlock = new List<Row>();
-                    List<Row> overflowRows = new List<Row>();
 
                     foreach (var row in rows)
                     {
@@ -167,41 +204,52 @@ namespace mDBMS.StorageManager
                             updatedCount++;
                             blockModified = true;
                         }
-                        newRowsForBlock.Add(row);
                     }
 
                     if (blockModified)
                     {
-                        List<byte[]> serializedRows = newRowsForBlock.Select(r => RowSerializer.SerializeRow(schema, r)).ToList();
-                        
-                        // Cek apakah muat
-                        // (Perhitungan kasar: Total data + header overhead)
-                        int totalSize = serializedRows.Sum(r => r.Length) + (serializedRows.Count * 2) + 4; // Estimasi overhead
-                        
-                        if (totalSize <= BlockSize)
+                        // Cek Ukuran Baru
+                        List<byte[]> serializedRows = rows.Select(r => RowSerializer.SerializeRow(schema, r)).ToList();
+                        int totalSize = serializedRows.Sum(r => r.Length) + (serializedRows.Count * 2) + 4;
+
+                        // LOGIC PENANGANAN OVERFLOW (Delete -> Insert)
+                        while (totalSize > BlockSize && rows.Count > 0)
                         {
-                            // Muat, tulis balik di posisi semula
-                            byte[] newBlock = BlockSerializer.CreateBlock(serializedRows);
-                            fs.Seek(blockOffsets[i], SeekOrigin.Begin);
-                            fs.Write(newBlock, 0, BlockSize);
+                            // Ambil row paling belakang
+                            Row victim = rows[rows.Count - 1];
+
+                            // Hapus dari blok ini (DELETE)
+                            rows.RemoveAt(rows.Count - 1);
+
+                            // Masukkan ke antrian untuk dipindah (INSERT nanti)
+                            rowsToMigrate.Add(victim);
+
+                            // Hitung ulang size
+                            serializedRows = rows.Select(r => RowSerializer.SerializeRow(schema, r)).ToList();
+                            totalSize = serializedRows.Sum(r => r.Length) + (serializedRows.Count * 2) + 4;
+
+                            Console.WriteLine($"[StorageEngine] Block {i} overflow. Migrating Row {victim.id}...");
                         }
-                        else
+                        // Simpan blok yang sudah aman (muat)
+                        byte[] newBlock = BlockSerializer.CreateBlock(serializedRows);
+                        if (_bufferManager != null)
                         {
-                            // Tidak muat (Overflow). 
-                            // Paksa Delete lalu Insert Logic di loop terpisah atau throw error.
-                            Console.WriteLine($"[WARNING] Block {i} overflow after update. Data might be truncated.");
-                            
-                            byte[] newBlock = BlockSerializer.CreateBlock(serializedRows);
-                            fs.Seek(blockOffsets[i], SeekOrigin.Begin);
-                            fs.Write(newBlock, 0, BlockSize);
+                            Page page = new(tableName, i, newBlock, true);
+                            _bufferManager.WriteToBuffer(page);
                         }
                     }
                 }
             }
 
+            foreach(var row in rowsToMigrate)
+            {
+                var insertData = new DataWrite(tableName, row.Columns, null);
+                AddBlock(insertData);
+            }
             return updatedCount;
         }
 
+        // Read block
         public IEnumerable<Row> ReadBlock(DataRetrieval dataRetrieval)
         {
             string tableName = dataRetrieval.Table;
@@ -209,27 +257,60 @@ namespace mDBMS.StorageManager
             string fullPath = Path.Combine(DataPath, fileName);
 
             if (!File.Exists(fullPath)) yield break;
-            
-            TableSchema? schema = GetSchemaFromFile(fileName); 
-            if (schema == null) yield break; 
 
-            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read))
+            TableSchema? schema = GetSchemaFromFile(fileName);
+            if (schema == null) yield break;
+
+            // HITUNG TOTAL BLOK DI DISK SEKARANG
+            long fileLength = new FileInfo(fullPath).Length;
+            int totalBlocks = (int)((fileLength - FileHeaderSize) / BlockSize);
+
+            using var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read);
+            if (fileLength <= FileHeaderSize) yield break;
+
+            if (_bufferManager == null)
             {
-                if (fs.Length <= FileHeaderSize) yield break;
-                fs.Seek(FileHeaderSize, SeekOrigin.Begin);
+                Console.Error.WriteLine("[StorageEngine] Buffer manager not initialized!");
+                yield break;
+            }
 
-                byte[] buffer = new byte[BlockSize];
-                while (fs.Read(buffer, 0, BlockSize) > 0)
+            for (int blockID = 0; blockID < totalBlocks; blockID++)
+            {
+                byte[] currentBlockData = new byte[BlockSize];
+                bool isDataFromBuffer = false;
+
+                // Try to read from buffer first
+                byte[] bufferData = _bufferManager.ReadFromBuffer(tableName, blockID);
+                if (bufferData != null && bufferData.Length == BlockSize)
                 {
-                    var rows = BlockSerializer.DeserializeBlock(schema, buffer);
-                    foreach (var row in rows)
+                    currentBlockData = bufferData;
+                    isDataFromBuffer = true;
+                }
+
+                // Gada di buffer, read from disk
+                if (!isDataFromBuffer)
+                {
+                    fs.Seek(FileHeaderSize + ((long)blockID * BlockSize), SeekOrigin.Begin);
+
+                    int bytesRead = fs.Read(currentBlockData, 0, BlockSize);
+
+                    if (bytesRead != BlockSize)
                     {
-                        if (CheckCondition(row, dataRetrieval.Condition)) yield return row;
+                        Console.WriteLine($"[WARNING] Block {blockID} could only read {bytesRead} bytes.");
+                        continue;
                     }
+                }
+
+                // Deserialize + filter
+                var rows = BlockSerializer.DeserializeBlock(schema, currentBlockData);
+                foreach (var row in rows)
+                {
+                    if (CheckCondition(row, dataRetrieval.Condition)) yield return row;
                 }
             }
         }
 
+        // Delete block
         public int DeleteBlock(DataDeletion dataDeletion)
         {
             string tableName = dataDeletion.Table;
@@ -243,66 +324,73 @@ namespace mDBMS.StorageManager
 
             int deletedCount = 0;
             // Read all -> Filter -> Rewrite
-            
-            var allBlocks = new List<byte[]>();
-            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read))
+
+            long fileLength = new FileInfo(fullPath).Length;
+            int totalBlocks = (int)((fileLength - FileHeaderSize) / BlockSize);
+
+            if (_bufferManager == null)
             {
-                if (fs.Length <= FileHeaderSize) return 0;
-                fs.Seek(FileHeaderSize, SeekOrigin.Begin);
-                byte[] buffer = new byte[BlockSize];
-                while (fs.Read(buffer, 0, BlockSize) > 0)
-                {
-                    byte[] copy = new byte[BlockSize];
-                    Array.Copy(buffer, copy, BlockSize);
-                    allBlocks.Add(copy);
-                }
+                Console.Error.WriteLine("[StorageEngine] Buffer manager not initialized!");
+                return 0;
             }
 
-            var newBlocks = new List<byte[]>();
-            foreach (var blockData in allBlocks)
+            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                var rows = BlockSerializer.DeserializeBlock(schema, blockData);
-                var survivingRows = new List<Row>();
-                bool modified = false;
-
-                foreach (var row in rows)
+                for (int blockID = 0; blockID < totalBlocks; blockID++)
                 {
-                    if (CheckCondition(row, dataDeletion.Condition))
-                    {
-                        deletedCount++;
-                        modified = true;
-                    }
-                    else
-                    {
-                        survivingRows.Add(row);
-                    }
-                }
+                    byte[] currentBlockData = new byte[BlockSize];
+                    bool isDataFromBuffer = false;
 
-                if (survivingRows.Count > 0)
-                {
+                    // A. CEK BUFFER DULU (Wajib!)
+                    byte[]? bufferedData = _bufferManager.ReadFromBuffer(tableName, blockID);
+                    if (bufferedData != null && bufferedData.Length == BlockSize)
+                    {
+                        currentBlockData = bufferedData;
+                        isDataFromBuffer = true;
+                    }
+
+                    // B. Kalau gak ada di buffer, baca Disk
+                    if (!isDataFromBuffer)
+                    {
+                        fs.Seek(FileHeaderSize + ((long)blockID * BlockSize), SeekOrigin.Begin);
+                        fs.Read(currentBlockData, 0, BlockSize);
+                    }
+
+                    // C. Deserialize & Filter Logic
+                    var rows = BlockSerializer.DeserializeBlock(schema, currentBlockData);
+                    var survivingRows = new List<Row>();
+                    bool modified = false;
+
+                    foreach (var row in rows)
+                    {
+                        if (CheckCondition(row, dataDeletion.Condition))
+                        {
+                            deletedCount++;
+                            modified = true;
+                        }
+                        else
+                        {
+                            survivingRows.Add(row);
+                        }
+                    }
+
                     if (modified)
                     {
-                         var serialized = survivingRows.Select(r => RowSerializer.SerializeRow(schema, r)).ToList();
-                         newBlocks.Add(BlockSerializer.CreateBlock(serialized));
-                    }
-                    else
-                    {
-                        newBlocks.Add(blockData);
-                    }
-                }
-            }
+                        if (survivingRows.Count > 0)
+                        {
+                            var serialized = survivingRows.Select(r => RowSerializer.SerializeRow(schema, r)).ToList();
+                            byte[] newBlock = BlockSerializer.CreateBlock(serialized);
 
-            // Write back (Rewrite file)
-            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Write))
-            {
-                fs.Seek(FileHeaderSize, SeekOrigin.Begin);
-                foreach (var block in newBlocks)
-                {
-                    fs.Write(block, 0, BlockSize);
-                }
-                fs.SetLength(FileHeaderSize + (newBlocks.Count * BlockSize));
-            }
+                            // Write to buffer
+                            Page page = new(tableName, blockID, newBlock, true);
+                            _bufferManager.WriteToBuffer(page);
+                        }
+                        // If no surviving rows, block is empty - could handle deletion
+                    }
 
+                }
+
+            }
             return deletedCount;
         }
 
@@ -357,18 +445,18 @@ namespace mDBMS.StorageManager
         {
             // Handle null pada lhs dan cek apakah string kosong
             string? colName = cond.lhs?.ToString();
-            
-            if (string.IsNullOrEmpty(colName) || !row.Columns.TryGetValue(colName, out object? val) || val == null) 
+
+            if (string.IsNullOrEmpty(colName) || !row.Columns.TryGetValue(colName, out object? val) || val == null)
                 return false;
 
-            try 
+            try
             {
                 // Handle null pada rhs dan gunakan nullable casting
                 if (cond.rhs == null) return false;
 
                 IComparable rowVal = (IComparable)val;
                 IComparable? condVal = (IComparable?)Convert.ChangeType(cond.rhs, val.GetType());
-                
+
                 if (condVal == null) return false;
 
                 int result = rowVal.CompareTo(condVal);
@@ -402,4 +490,4 @@ namespace mDBMS.StorageManager
 // FRM -> flushBuffer(Page) {SM.WriteDisk(Page)}
 // Sm ->  void WriteDisk(Page)
 
-// Sm -> invoke readfrombuffer kalo mau read 
+// Sm -> invoke readfrombuffer kalo mau read

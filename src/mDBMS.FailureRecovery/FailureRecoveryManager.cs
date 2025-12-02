@@ -353,7 +353,6 @@ namespace mDBMS.FailureRecovery
                 Console.Error.WriteLine($"Gagal flush page {page.TableName}-{page.BlockID} - {ex.Message}");
                 return false;
             }
-            return false;
         }
 
 
