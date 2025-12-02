@@ -13,11 +13,12 @@ namespace mDBMS.Common.Net
                 writer.Write(result.Success);
                 writer.Write(result.Message ?? string.Empty);
 
-                writer.Write(result.TransactionId.HasValue);
-                if (result.TransactionId.HasValue)
-                {
-                    writer.Write(result.TransactionId.Value);
-                }
+                // temp commented soalnya executionresult gada transac id
+                // writer.Write(result.TransactionId.HasValue);
+                // if (result.TransactionId.HasValue)
+                // {
+                //     writer.Write(result.TransactionId.Value);
+                // }
 
                 if (result.Data != null)
                 {
@@ -30,7 +31,7 @@ namespace mDBMS.Common.Net
                         foreach (var pair in row.Columns)
                         {
                             writer.Write(pair.Key);
-                            
+
                             if (pair.Value == null)
                             {
                                 writer.Write("null");

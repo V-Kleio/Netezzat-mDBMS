@@ -15,10 +15,11 @@ public class ExecutionResultDecoder
             result.Success = reader.ReadBoolean();
             result.Message = reader.ReadString();
 
-            if (reader.ReadBoolean())
-            {
-                result.TransactionId = reader.ReadInt32();
-            }
+            // temp commented soalnya executionresult gada transac id
+            // if (reader.ReadBoolean())
+            // {
+            //     result.TransactionId = reader.ReadInt32();
+            // }
 
             int rowCount = reader.ReadInt32();
             if (rowCount > 0)

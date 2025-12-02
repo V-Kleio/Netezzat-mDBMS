@@ -9,7 +9,7 @@ namespace mDBMS.FailureRecovery
 {
     public class FailureRecoveryManager : IFailureRecoveryManager, IBufferManager
     {
-        private readonly mDBMS.Common.Data.BufferPool _bufferPool;
+        private readonly BufferPool _bufferPool;
 
         private IQueryProcessor? _queryProcessor;
         private IStorageManager? _storageManager;
@@ -19,10 +19,12 @@ namespace mDBMS.FailureRecovery
         private long _currentLSN;
         private readonly object _logLock = new object();
 
+        private List<LogEntry> _logBuffer = new List<LogEntry>();
+
         public FailureRecoveryManager(IQueryProcessor? queryProcessor = null, IStorageManager? storageManager = null)
         {
-            _bufferPool = new mDBMS.Common.Data.BufferPool();
-            
+            _bufferPool = new BufferPool();
+
             _queryProcessor = queryProcessor;
             _storageManager = storageManager;
 
@@ -44,51 +46,43 @@ namespace mDBMS.FailureRecovery
         }
 
         // ======================================== MAIN ========================================
-        public void WriteLog(ExecutionResult info)
+        public void WriteLog(ExecutionLog info)
         {
             if (info == null)
             {
                 throw new ArgumentNullException(nameof(info));
             }
 
-             if (!info.Success)
-            {
-                return;
-            }
 
-            // operasi SELECT tidak perlu di-log karena tidak mengubah data
-            if (info.Query.TrimStart().ToUpperInvariant().StartsWith("SELECT"))
+             lock (_logLock)
             {
-                return;
-            }
-
-            lock (_logLock)
-            {
-                try
+                var entry = new LogEntry
                 {
-                    // tentukan tipe operasi dari query
-                    var operationType = DetermineOperationType(info.Query);
+                    LSN = _currentLSN,
+                    Timestamp = DateTime.Now,
+                    TransactionId = info.TransactionId,
+                    OperationType = MapOperationType(info.Operation),  // Convert ExecutionLog.OperationType → LogOperationType
+                    TableName = info.TableName,
+                    RowIdentifier = info.RowIdentifier,
+                    BeforeImage = info.BeforeImage,
+                    AfterImage = info.AfterImage
+                };
 
-                    // buat log entry berdasarkan tipe operasi
-                    LogEntry logEntry = CreateLogEntryFromExecutionResult(info, operationType);
 
-                    // serialize dan tulis ke file
-                    string serializedLog = logEntry.Serialize();
-                    File.AppendAllText(_logFilePath, serializedLog + Environment.NewLine);
+                // Nambah ke logBuffer
 
-                    // increment LSN untuk entry berikutnya
-                    _currentLSN++;
-                }
-                catch (Exception ex)
-                {
-                    // log error dan re-throw karena write-ahead logging harus berhasil
-                    Console.Error.WriteLine($"[ERROR FRM]: Gagal menulis log - {ex.Message}");
-                    throw;
-                }
+                _logBuffer.Add(entry);
+
+                _currentLSN++;
+
+                // ! Auto flush (INI TEMPORARY FOR TESTING)
+                // Later flush nya pas: 1. commit, 2. checkpoint, 3. buffer penuh, 4. shutdown graceful
+                File.AppendAllText(_logFilePath, entry.Serialize() + "\n");
             }
         }
 
         // Undo Wajib: undo transaksi yang di-abort (Transaction Abort Recovery)
+        // ? paramnya bisa RecoverCriteria
         // Gunanya buat rollback transaksi yang gagal/dibatalin based on ID transaksi yang mau di-undo
         public bool UndoTransaction(int transactionId)
         {
@@ -170,8 +164,22 @@ namespace mDBMS.FailureRecovery
             }
         }
 
+        public void FlushLogBuffer()
+        {
+            lock (_logLock)
+            {
+                if (_logBuffer.Count == 0) return;
 
-        // Recover up until recover criteria, uses ExecuteRecoveryQuery
+                foreach (var entry in _logBuffer)
+                {
+                    File.AppendAllText(_logFilePath, entry.Serialize() + "\n");
+                }
+
+                _logBuffer.Clear();
+            }
+        }
+
+        //! (INI BONUS, belom dipake, need REDO) Recover up until recover criteria, uses ExecuteRecoveryQuery
         public void Recover(RecoverCriteria criteria)
         {
             Console.WriteLine($"[FRM RECOVER]: Memulai recovery untuk TransactionId={criteria.TransactionId}, Timestamp={criteria.Timestamp}");
@@ -325,6 +333,7 @@ namespace mDBMS.FailureRecovery
             }
         }
 
+
         /// <summary>
         /// Flush page ke disk via Storage Manager
         /// </summary>
@@ -338,13 +347,8 @@ namespace mDBMS.FailureRecovery
 
             try
             {
-                // TODO (SM): Convert Page object ke DataWrite format yang sesuai untuk SM
-                // Contoh implementasi:
-                // var dataWrite = ConvertPageToDataWrite(page);
-                // int result = _storageManager.WriteBlock(dataWrite);
-                // return result > 0;
+                // TODO (SM): panggil WriteToDisk punya SM
 
-                // Sementara return false karena belum terintegrasi
                 return false;
             }
             catch (Exception ex)
@@ -353,6 +357,8 @@ namespace mDBMS.FailureRecovery
                 return false;
             }
         }
+
+
 
         /// <summary>
         /// Ambil daftar transaksi yang masih aktif (belum COMMIT/ABORT)
@@ -474,90 +480,78 @@ namespace mDBMS.FailureRecovery
         // Undo INSERT = DELETE by RowIdentifier
         private string GenerateUndoForInsert(LogEntry entry)
         {
-            if (string.IsNullOrEmpty(entry.TableName) || string.IsNullOrEmpty(entry.RowIdentifier))
-            {
-                Console.Error.WriteLine($"[ERROR FRM]: Missing TableName or RowIdentifier untuk undo INSERT");
-                return string.Empty;
+                if (string.IsNullOrEmpty(entry.TableName) || string.IsNullOrEmpty(entry.RowIdentifier))
+                {
+                    Console.Error.WriteLine($"[ERROR FRM]: Missing TableName or RowIdentifier untuk undo INSERT");
+                    return string.Empty;
+                }
+
+                // Assuming RowIdentifier contains primary key information
+                // Format: DELETE FROM table WHERE primary_key = value
+                return $"DELETE FROM {entry.TableName} WHERE {entry.RowIdentifier}";
             }
 
-            // Assuming RowIdentifier contains primary key information
-            // Format: DELETE FROM table WHERE primary_key = value
-            return $"DELETE FROM {entry.TableName} WHERE {entry.RowIdentifier}";
-        }
-
-        /// Undo UPDATE = Restore BeforeImage
+            /// Undo UPDATE = Restore BeforeImage
         private string GenerateUndoForUpdate(LogEntry entry)
         {
-            if (string.IsNullOrEmpty(entry.TableName) ||
-                string.IsNullOrEmpty(entry.RowIdentifier) ||
-                string.IsNullOrEmpty(entry.BeforeImage) ||
-                entry.BeforeImage == "NULL")
+            if (entry.TableName == null ||
+                entry.RowIdentifier == null ||
+                entry.BeforeImage == null)
             {
-                Console.Error.WriteLine($"[ERROR FRM]: Missing data untuk undo UPDATE");
+                Console.Error.WriteLine("[ERROR FRM]: Missing data untuk undo UPDATE");
                 return string.Empty;
             }
 
             try
             {
-                // Parse BeforeImage (format: {"col1":"val1","col2":"val2"})
-                var beforeData = ParseRowData(entry.BeforeImage);
-
-                if (beforeData.Count == 0)
-                {
-                    Console.Error.WriteLine($"[ERROR FRM]: Failed to parse BeforeImage");
-                    return string.Empty;
-                }
-
-                // Build SET clause
+                // BeforeImage sudah Row, jadi akses langsung:
                 var setClause = string.Join(", ",
-                    beforeData.Select(kv => $"{kv.Key} = '{EscapeSqlString(kv.Value)}'"));
+                    entry.BeforeImage.Columns.Select(
+                        kv => $"{kv.Key} = '{EscapeSqlString(kv.Value?.ToString() ?? "NULL")}'"
+                    )
+                );
 
-                // Format: UPDATE table SET col1=val1, col2=val2 WHERE primary_key = value
                 return $"UPDATE {entry.TableName} SET {setClause} WHERE {entry.RowIdentifier}";
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[ERROR FRM]: Exception generating undo UPDATE - {ex.Message}");
+                Console.Error.WriteLine($"[ERROR FRM]: Exception undo UPDATE - {ex.Message}");
                 return string.Empty;
             }
         }
 
+
+
         /// Undo DELETE = Re-insert BeforeImage
         private string GenerateUndoForDelete(LogEntry entry)
         {
-            if (string.IsNullOrEmpty(entry.TableName) ||
-                string.IsNullOrEmpty(entry.BeforeImage) ||
-                entry.BeforeImage == "NULL")
+            if (entry.TableName == null ||
+                entry.BeforeImage == null)
             {
-                Console.Error.WriteLine($"[ERROR FRM]: Missing data untuk undo DELETE");
+                Console.Error.WriteLine("[ERROR FRM]: Missing data untuk undo DELETE");
                 return string.Empty;
             }
 
             try
             {
-                // Parse BeforeImage
-                var beforeData = ParseRowData(entry.BeforeImage);
+                // Akses dari Row.Columns
+                var columns = string.Join(", ", entry.BeforeImage.Columns.Keys);
 
-                if (beforeData.Count == 0)
-                {
-                    Console.Error.WriteLine($"[ERROR FRM]: Failed to parse BeforeImage");
-                    return string.Empty;
-                }
-
-                // Build column names and values
-                var columns = string.Join(", ", beforeData.Keys);
                 var values = string.Join(", ",
-                    beforeData.Values.Select(v => $"'{EscapeSqlString(v)}'"));
+                    entry.BeforeImage.Columns.Values.Select(
+                        v => $"'{EscapeSqlString(v?.ToString() ?? "NULL")}'"
+                    )
+                );
 
-                // Format: INSERT INTO table (col1, col2) VALUES (val1, val2)
                 return $"INSERT INTO {entry.TableName} ({columns}) VALUES ({values})";
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[ERROR FRM]: Exception generating undo DELETE - {ex.Message}");
+                Console.Error.WriteLine($"[ERROR FRM]: Exception undo DELETE - {ex.Message}");
                 return string.Empty;
             }
         }
+
 
         // ======================================== Recovery Helper ========================================
         private bool ShouldRecoverEntry(LogEntry entry, RecoverCriteria criteria)
@@ -615,117 +609,58 @@ namespace mDBMS.FailureRecovery
             return entries;
         }
 
-        /// <summary>
-        /// tentukan tipe operasi dari query string
-        /// </summary>
-        private LogOperationType DetermineOperationType(string query)
-        {
-            if (string.IsNullOrWhiteSpace(query))
-            {
-                throw new ArgumentException("Query tidak boleh kosong");
-            }
-
-            var normalizedQuery = query.Trim().ToUpperInvariant();
-
-            if (normalizedQuery.StartsWith("BEGIN"))
-                return LogOperationType.BEGIN_TRANSACTION;
-
-            if (normalizedQuery.StartsWith("COMMIT"))
-                return LogOperationType.COMMIT;
-
-            if (normalizedQuery.StartsWith("ROLLBACK") || normalizedQuery.StartsWith("ABORT"))
-                return LogOperationType.ABORT;
-
-            if (normalizedQuery.StartsWith("INSERT"))
-                return LogOperationType.INSERT;
-
-            if (normalizedQuery.StartsWith("UPDATE"))
-                return LogOperationType.UPDATE;
-
-            if (normalizedQuery.StartsWith("DELETE"))
-                return LogOperationType.DELETE;
-
-            // operasi SELECT tidak perlu di-log karena tidak mengubah data
-            throw new InvalidOperationException($"Tipe operasi tidak dikenali atau tidak perlu di-log: {query}");
-        }
 
         /// <summary>
-        /// buat LogEntry dari ExecutionResult
+        /// Map dari ExecutionLog.OperationType (enum dari QP) ke LogOperationType (enum di FRM)
         /// </summary>
-        private LogEntry CreateLogEntryFromExecutionResult(ExecutionResult info, LogOperationType operationType)
+        private LogOperationType MapOperationType(ExecutionLog.OperationType operation)
         {
-            // ambil TransactionId dari ExecutionResult
-            int transactionId = info.TransactionId ?? -1;
-
-            // ambil informasi dari ExecutionResult yang sudah diisi oleh Query Processor
-            string? tableName = info.TableName;
-            string? beforeImage = info.BeforeImage;
-            string? afterImage = info.AfterImage;
-            string? rowIdentifier = info.RowIdentifier;
-
-            // fallback: jika tableName tidak ada, coba extract dari query
-            if (string.IsNullOrEmpty(tableName))
+            return operation switch
             {
-                tableName = ExtractTableNameFromQuery(info.Query);
-            }
-
-            // fallback: jika afterImage tidak ada tapi ada Data (untuk SELECT yang di-log), serialize
-            if (string.IsNullOrEmpty(afterImage) && info.Data != null && info.Data.Any())
-            {
-                var firstRow = info.Data.First();
-                afterImage = SerializeRowData(firstRow);
-            }
-
-            // buat log entry sesuai tipe operasi
-            return operationType switch
-            {
-                LogOperationType.BEGIN_TRANSACTION => LogEntry.CreateBeginTransaction(_currentLSN, transactionId),
-                LogOperationType.COMMIT => LogEntry.CreateCommit(_currentLSN, transactionId),
-                LogOperationType.ABORT => LogEntry.CreateAbort(_currentLSN, transactionId),
-                LogOperationType.INSERT => LogEntry.CreateInsert(_currentLSN, transactionId, tableName ?? "UNKNOWN", rowIdentifier ?? "UNKNOWN", afterImage ?? "NULL"),
-                LogOperationType.UPDATE => LogEntry.CreateUpdate(_currentLSN, transactionId, tableName ?? "UNKNOWN", rowIdentifier ?? "UNKNOWN", beforeImage ?? "NULL", afterImage ?? "NULL"),
-                LogOperationType.DELETE => LogEntry.CreateDelete(_currentLSN, transactionId, tableName ?? "UNKNOWN", rowIdentifier ?? "UNKNOWN", beforeImage ?? "NULL"),
-                _ => throw new InvalidOperationException($"Tipe operasi tidak didukung: {operationType}")
+                ExecutionLog.OperationType.INSERT => LogOperationType.INSERT,
+                ExecutionLog.OperationType.UPDATE => LogOperationType.UPDATE,
+                ExecutionLog.OperationType.DELETE => LogOperationType.DELETE,
+                _ => throw new ArgumentException($"Unknown operation type: {operation}", nameof(operation))
             };
         }
 
-        /// <summary>
-        /// ekstrak nama tabel dari query string (simple parser)
-        /// </summary>
-        private string? ExtractTableNameFromQuery(string query)
+        private LogOperationType ParseOperationType(string operation)
         {
-            if (string.IsNullOrWhiteSpace(query))
-                return null;
-
-            var tokens = query.Trim().Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-
-            // INSERT INTO table_name ...
-            if (tokens.Length > 2 && tokens[0].Equals("INSERT", StringComparison.OrdinalIgnoreCase)
-                && tokens[1].Equals("INTO", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(operation))
             {
-                return tokens[2];
+                throw new ArgumentException("Operation type cannot be null or empty", nameof(operation));
             }
 
-            // UPDATE table_name ...
-            if (tokens.Length > 1 && tokens[0].Equals("UPDATE", StringComparison.OrdinalIgnoreCase))
+            return operation.ToUpperInvariant() switch
             {
-                return tokens[1];
-            }
+                "INSERT" => LogOperationType.INSERT,
+                "UPDATE" => LogOperationType.UPDATE,
+                "DELETE" => LogOperationType.DELETE,
+                "BEGIN" => LogOperationType.BEGIN_TRANSACTION,
+                "COMMIT" => LogOperationType.COMMIT,
+                "ROLLBACK" => LogOperationType.ABORT,
+                "ABORT" => LogOperationType.ABORT,
 
-            // DELETE FROM table_name ...
-            if (tokens.Length > 2 && tokens[0].Equals("DELETE", StringComparison.OrdinalIgnoreCase)
-                && tokens[1].Equals("FROM", StringComparison.OrdinalIgnoreCase))
-            {
-                return tokens[2];
-            }
+                // Alias/alternatif
+                "BEGIN TRANSACTION" => LogOperationType.BEGIN_TRANSACTION,
+                "COMMIT TRANSACTION" => LogOperationType.COMMIT,
+                "ROLLBACK TRANSACTION" => LogOperationType.ABORT,
 
-            return null;
+                // Checkpoint
+                "CHECKPOINT" => LogOperationType.CHECKPOINT,
+                "END CHECKPOINT" => LogOperationType.END_CHECKPOINT,
+                "END_CHECKPOINT" => LogOperationType.END_CHECKPOINT,
+
+                _ => throw new ArgumentException($"Unknown operation type: {operation}", nameof(operation))
+            };
         }
+
+
 
         /// <summary>
         /// serialize row data menjadi string format JSON-like
         /// </summary>
-        private string SerializeRowData(mDBMS.Common.Data.Row row)
+        private string SerializeRowData(Row row)
         {
             var sb = new StringBuilder();
             sb.Append("{");
@@ -764,46 +699,7 @@ namespace mDBMS.FailureRecovery
         }
 
         // ======================================== PARSER Before/AfterImage Helpers ========================================
-        /// <summary>
-        /// Parse row data dari JSON-like format menjadi dictionary
-        /// Format: {"col1":"val1","col2":"val2"}
-        /// </summary>
-        private Dictionary<string, string> ParseRowData(string jsonLike)
-        {
-            var result = new Dictionary<string, string>();
 
-            if (string.IsNullOrEmpty(jsonLike))
-                return result;
-
-            try
-            {
-                var content = jsonLike.Trim().Trim('{', '}');
-                if (string.IsNullOrEmpty(content))
-                    return result;
-                // Split by comma (simple parser, assumes no commas in values)
-                var pairs = content.Split(',');
-
-                foreach (var pair in pairs)
-                {
-                    // Split by colon
-                    var parts = pair.Split(new[] { ':' }, 2);
-
-                    if (parts.Length == 2)
-                    {
-                        // Remove quotes and whitespace
-                        var key = parts[0].Trim().Trim('"');
-                        var value = parts[1].Trim().Trim('"');
-                        result[key] = value;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[ERROR FRM]: Failed to parse row data - {ex.Message}");
-            }
-
-            return result;
-        }
 
         /// <summary>
         /// Escape single quotes in SQL strings
