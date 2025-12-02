@@ -160,7 +160,6 @@ namespace mDBMS.StorageManager
                     {
                         if (CheckCondition(row, data_write.Condition))
                         {
-                            // Lakukan Update
                             foreach (var kvp in data_write.NewValues)
                             {
                                 row[kvp.Key] = kvp.Value;
@@ -175,7 +174,7 @@ namespace mDBMS.StorageManager
                     {
                         List<byte[]> serializedRows = newRowsForBlock.Select(r => RowSerializer.SerializeRow(schema, r)).ToList();
                         
-                        // Cek apakah muat?
+                        // Cek apakah muat
                         // (Perhitungan kasar: Total data + header overhead)
                         int totalSize = serializedRows.Sum(r => r.Length) + (serializedRows.Count * 2) + 4; // Estimasi overhead
                         
@@ -189,15 +188,10 @@ namespace mDBMS.StorageManager
                         else
                         {
                             // Tidak muat (Overflow). 
-                            // Solusi: Hapus baris yang diupdate dari blok ini, dan Insert ulang sebagai baris baru (AddBlock logic).
-                            // Karena 'fs' sedang dibuka Write, kita harus hati-hati.
-                            // Untuk amannya di Milestone ini: Write ulang blok yang muat, lalu panggil AddBlock terpisah nanti (tidak bisa karena fs lock).
-                            
-                            // Cara sederhana: Paksa Delete lalu Insert Logic di loop terpisah atau throw error.
-                            // Disini kita biarkan dulu (risiko data corrupt jika overflow), atau log error.
+                            // Paksa Delete lalu Insert Logic di loop terpisah atau throw error.
                             Console.WriteLine($"[WARNING] Block {i} overflow after update. Data might be truncated.");
                             
-                            byte[] newBlock = BlockSerializer.CreateBlock(serializedRows); // BlockSerializer mungkin akan truncate otomatis
+                            byte[] newBlock = BlockSerializer.CreateBlock(serializedRows);
                             fs.Seek(blockOffsets[i], SeekOrigin.Begin);
                             fs.Write(newBlock, 0, BlockSize);
                         }
@@ -248,7 +242,7 @@ namespace mDBMS.StorageManager
             if (schema == null) return 0;
 
             int deletedCount = 0;
-            // Logic: Read all -> Filter -> Rewrite
+            // Read all -> Filter -> Rewrite
             
             var allBlocks = new List<byte[]>();
             using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read))
@@ -322,7 +316,7 @@ namespace mDBMS.StorageManager
 
         public Statistic GetStats(string tablename)
         {
-             // Implementasi statistik (sama seperti sebelumnya)
+             // Implementasi statistik
              return new Statistic { Table = tablename };
         }
 
@@ -361,17 +355,24 @@ namespace mDBMS.StorageManager
 
         private bool EvaluateSingleCondition(Row row, Condition cond)
         {
-            string colName = cond.lhs.ToString();
-            if (!row.Columns.TryGetValue(colName, out object? val) || val == null) return false;
+            // Handle null pada lhs dan cek apakah string kosong
+            string? colName = cond.lhs?.ToString();
+            
+            if (string.IsNullOrEmpty(colName) || !row.Columns.TryGetValue(colName, out object? val) || val == null) 
+                return false;
 
             try 
             {
+                // Handle null pada rhs dan gunakan nullable casting
+                if (cond.rhs == null) return false;
+
                 IComparable rowVal = (IComparable)val;
-                IComparable condVal = (IComparable)Convert.ChangeType(cond.rhs, val.GetType());
+                IComparable? condVal = (IComparable?)Convert.ChangeType(cond.rhs, val.GetType());
                 
+                if (condVal == null) return false;
+
                 int result = rowVal.CompareTo(condVal);
 
-                // Condition.Operation untuk akses Enum
                 switch (cond.opr)
                 {
                     case Condition.Operation.EQ: return result == 0;
