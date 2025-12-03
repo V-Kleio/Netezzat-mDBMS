@@ -192,57 +192,6 @@ namespace mDBMS.FailureRecovery
             };
         }
 
-        /// Create log entry untuk UPDATE
-        public static LogEntry CreateUpdate(long lsn, int transactionId, string tableName,
-            string rowId, Row beforeImage, Row afterImage)
-        {
-            return new LogEntry
-            {
-                LSN = lsn,
-                Timestamp = DateTime.Now,
-                TransactionId = transactionId,
-                OperationType = LogOperationType.UPDATE,
-                TableName = tableName,
-                RowIdentifier = rowId,
-                BeforeImage = beforeImage,
-                AfterImage = afterImage
-            };
-        }
-
-        /// Create log entry untuk INSERT
-        public static LogEntry CreateInsert(long lsn, int transactionId, string tableName,
-            string rowId, Row afterImage)
-        {
-            return new LogEntry
-            {
-                LSN = lsn,
-                Timestamp = DateTime.Now,
-                TransactionId = transactionId,
-                OperationType = LogOperationType.INSERT,
-                TableName = tableName,
-                RowIdentifier = rowId,
-                BeforeImage = null, // INSERT tidak punya before image
-                AfterImage = afterImage
-            };
-        }
-
-        /// Create log entry untuk DELETE
-        public static LogEntry CreateDelete(long lsn, int transactionId, string tableName,
-            string rowId, Row beforeImage)
-        {
-            return new LogEntry
-            {
-                LSN = lsn,
-                Timestamp = DateTime.Now,
-                TransactionId = transactionId,
-                OperationType = LogOperationType.DELETE,
-                TableName = tableName,
-                RowIdentifier = rowId,
-                BeforeImage = beforeImage,
-                AfterImage = null // DELETE tidak punya after image
-            };
-        }
-
         /// Create log entry untuk CHECKPOINT
         public static LogEntry CreateCheckpoint(long lsn, List<int> activeTransactions)
         {
@@ -268,5 +217,60 @@ namespace mDBMS.FailureRecovery
             return $"[LSN={LSN}] [{Timestamp:yyyy-MM-dd HH:mm:ss}] [Txn={TransactionId}] " +
                    $"[Op={OperationType}] [Table={TableName ?? "N/A"}] [Row={RowIdentifier ?? "N/A"}]";
         }
+
+        // Yang dicomment itu redundant, soalnya INSERT/UPDATE/DELETE pake WriteLog (bukan WriteLogEntry) di FRM yang langsung nerima ExecutionLog
+
+        /// Create log entry untuk UPDATE
+        // public static LogEntry CreateUpdate(long lsn, int transactionId, string tableName,
+        //     string rowId, Row beforeImage, Row afterImage)
+        // {
+        //     return new LogEntry
+        //     {
+        //         LSN = lsn,
+        //         Timestamp = DateTime.Now,
+        //         TransactionId = transactionId,
+        //         OperationType = LogOperationType.UPDATE,
+        //         TableName = tableName,
+        //         RowIdentifier = rowId,
+        //         BeforeImage = beforeImage,
+        //         AfterImage = afterImage
+        //     };
+        // }
+
+        // /// Create log entry untuk INSERT
+        // public static LogEntry CreateInsert(long lsn, int transactionId, string tableName,
+        //     string rowId, Row afterImage)
+        // {
+        //     return new LogEntry
+        //     {
+        //         LSN = lsn,
+        //         Timestamp = DateTime.Now,
+        //         TransactionId = transactionId,
+        //         OperationType = LogOperationType.INSERT,
+        //         TableName = tableName,
+        //         RowIdentifier = rowId,
+        //         BeforeImage = null, // INSERT tidak punya before image
+        //         AfterImage = afterImage
+        //     };
+        // }
+
+        // /// Create log entry untuk DELETE
+        // public static LogEntry CreateDelete(long lsn, int transactionId, string tableName,
+        //     string rowId, Row beforeImage)
+        // {
+        //     return new LogEntry
+        //     {
+        //         LSN = lsn,
+        //         Timestamp = DateTime.Now,
+        //         TransactionId = transactionId,
+        //         OperationType = LogOperationType.DELETE,
+        //         TableName = tableName,
+        //         RowIdentifier = rowId,
+        //         BeforeImage = beforeImage,
+        //         AfterImage = null // DELETE tidak punya after image
+        //     };
+        // }
+
+
     }
 }

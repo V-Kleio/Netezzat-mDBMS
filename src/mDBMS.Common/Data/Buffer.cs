@@ -106,7 +106,7 @@ namespace mDBMS.Common.Data
             }
         }
 
-        public List<Page> FlushAll()
+        public List<Page> FlushDirties()
         {
             var dirtyPages = GetDirtyPages();
             _frames.Clear();

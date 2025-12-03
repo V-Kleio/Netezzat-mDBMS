@@ -1,12 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\mDBMS.Common\mDBMS.Common.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Exclude integration test from build (circular dependency with StorageManager) -->
-    <Compile Remove="tests\Integration_SM_FRM_Test.cs" />
+    <ProjectReference Include="..\mDBMS.FailureRecovery\mDBMS.FailureRecovery.csproj" />
+    <ProjectReference Include="..\mDBMS.StorageManager\mDBMS.StorageManager.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

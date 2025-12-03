@@ -21,6 +21,11 @@ namespace mDBMS.FailureRecovery
 
         private List<LogEntry> _logBuffer = new List<LogEntry>();
 
+        // Constants for automatic flushing
+        private const int MaxLogBufferSize = 100; // Flush log when buffer udah mo lewat size (100)
+        private const int CheckpointInterval = 10; // Checkpoint every N (10) commits
+        private int _commitsSinceLastCheckpoint = 0;
+
         public FailureRecoveryManager(IQueryProcessor? queryProcessor = null, IStorageManager? storageManager = null)
         {
             _bufferPool = new BufferPool();
@@ -46,6 +51,9 @@ namespace mDBMS.FailureRecovery
         }
 
         // ======================================== MAIN ========================================
+        /// <summary>
+        /// WriteLog untuk data operations (INSERT/UPDATE/DELETE) dari QP
+        /// </summary>
         public void WriteLog(ExecutionLog info)
         {
             if (info == null)
@@ -68,17 +76,73 @@ namespace mDBMS.FailureRecovery
                     AfterImage = info.AfterImage
                 };
 
-
-                // Nambah ke logBuffer
-
                 _logBuffer.Add(entry);
-
                 _currentLSN++;
 
-                // ! Auto flush (INI TEMPORARY FOR TESTING)
-                // Later flush nya pas: 1. commit, 2. checkpoint, 3. buffer penuh, 4. shutdown graceful
-                File.AppendAllText(_logFilePath, entry.Serialize() + "\n");
+                // Auto-flush if log buffer is full
+                if (_logBuffer.Count >= MaxLogBufferSize)
+                {
+                    FlushLogBuffer();
+                }
             }
+        }
+
+        /// <summary>
+        /// WriteLogEntry untuk transaction control (BEGIN/COMMIT/ABORT) dan CHECKPOINT
+        /// Digunakan oleh CCM/TM atau internal FRM
+        /// Trigger otomatis periodic checkpoint
+        /// </summary>
+        public void WriteLogEntry(LogEntry entry)
+        {
+            if (entry == null)
+            {
+                throw new ArgumentNullException(nameof(entry));
+            }
+
+            lock (_logLock)
+            {
+                // Set LSN jika belum di-set
+                if (entry.LSN == 0 || entry.LSN < _currentLSN)
+                {
+                    entry.LSN = _currentLSN;
+                }
+
+                _logBuffer.Add(entry);
+                _currentLSN++;
+
+                // Flush on COMMIT
+                if (entry.OperationType == LogOperationType.COMMIT)
+                {
+                    FlushLogBuffer();
+
+                    // INI TRIGGER PERIODIC CHECKPOINT based on commit count
+                    _commitsSinceLastCheckpoint++;
+                    if (_commitsSinceLastCheckpoint >= CheckpointInterval)
+                    {
+                        Console.WriteLine($"[FRM]: Triggering periodic checkpoint after {_commitsSinceLastCheckpoint} commits");
+                        SaveCheckpoint();
+                        _commitsSinceLastCheckpoint = 0;
+                    }
+                }
+                // Flush on ABORT, ensures abort is logged
+                else if (entry.OperationType == LogOperationType.ABORT)
+                {
+                    FlushLogBuffer();
+                }
+                // Auto-flush if log buffer is full
+                else if (_logBuffer.Count >= MaxLogBufferSize)
+                {
+                    FlushLogBuffer();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Expose current LSN untuk factory methods
+        /// </summary>
+        public long GetCurrentLSN()
+        {
+            return _currentLSN;
         }
 
         // Undo Wajib: undo transaksi yang di-abort (Transaction Abort Recovery)
@@ -164,6 +228,10 @@ namespace mDBMS.FailureRecovery
             }
         }
 
+
+        /// <summary>
+        /// Flush all log entries in the log buffer to disk (.log)
+        /// </summary>
         public void FlushLogBuffer()
         {
             lock (_logLock)
@@ -178,8 +246,10 @@ namespace mDBMS.FailureRecovery
                 _logBuffer.Clear();
             }
         }
-
-        //! (INI BONUS, belom dipake, need REDO) Recover up until recover criteria, uses ExecuteRecoveryQuery
+        /// <summary>
+        /// (INI BONUS, belom dipake dulu, need REDO) Recover up until recover criteria, uses ExecuteRecoveryQuery
+        /// Recovery utama wajib yang dipake itu UndoTransaction (Abort)
+        /// </summary>
         public void Recover(RecoverCriteria criteria)
         {
             Console.WriteLine($"[FRM RECOVER]: Memulai recovery untuk TransactionId={criteria.TransactionId}, Timestamp={criteria.Timestamp}");
@@ -262,6 +332,9 @@ namespace mDBMS.FailureRecovery
             {
                 try
                 {
+                    // 0. Flush log buffer terlebih dahulu
+                    FlushLogBuffer();
+
                     // 1. Ambil semua dirty pages dari buffer
                     var dirtyPages = _bufferPool.GetDirtyPages();
 
@@ -301,7 +374,7 @@ namespace mDBMS.FailureRecovery
                     }
 
                     // 3. Flush buffer (kosongkan)
-                    var remainingDirtyPages = _bufferPool.FlushAll();
+                    var remainingDirtyPages = _bufferPool.FlushDirties();
 
                     if (remainingDirtyPages.Count > 0)
                     {
@@ -341,19 +414,16 @@ namespace mDBMS.FailureRecovery
         {
             if (_storageManager == null)
             {
-                // TODO (SM): Integrate dengan Storage Manager
                 return false;
             }
 
             try
             {
-                // TODO (SM): panggil WriteToDisk punya SM
-
-                return false;
+                return _storageManager.WriteDisk(page) == 1;
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[FRM]: Gagal flush page {page.TableName}-{page.BlockID} - {ex.Message}");
+                Console.Error.WriteLine($"Gagal flush page {page.TableName}-{page.BlockID} - {ex.Message}");
                 return false;
             }
         }
@@ -624,53 +694,8 @@ namespace mDBMS.FailureRecovery
             };
         }
 
-        private LogOperationType ParseOperationType(string operation)
-        {
-            if (string.IsNullOrWhiteSpace(operation))
-            {
-                throw new ArgumentException("Operation type cannot be null or empty", nameof(operation));
-            }
-
-            return operation.ToUpperInvariant() switch
-            {
-                "INSERT" => LogOperationType.INSERT,
-                "UPDATE" => LogOperationType.UPDATE,
-                "DELETE" => LogOperationType.DELETE,
-                "BEGIN" => LogOperationType.BEGIN_TRANSACTION,
-                "COMMIT" => LogOperationType.COMMIT,
-                "ROLLBACK" => LogOperationType.ABORT,
-                "ABORT" => LogOperationType.ABORT,
-
-                // Alias/alternatif
-                "BEGIN TRANSACTION" => LogOperationType.BEGIN_TRANSACTION,
-                "COMMIT TRANSACTION" => LogOperationType.COMMIT,
-                "ROLLBACK TRANSACTION" => LogOperationType.ABORT,
-
-                // Checkpoint
-                "CHECKPOINT" => LogOperationType.CHECKPOINT,
-                "END CHECKPOINT" => LogOperationType.END_CHECKPOINT,
-                "END_CHECKPOINT" => LogOperationType.END_CHECKPOINT,
-
-                _ => throw new ArgumentException($"Unknown operation type: {operation}", nameof(operation))
-            };
-        }
 
 
-
-        /// <summary>
-        /// serialize row data menjadi string format JSON-like
-        /// </summary>
-        private string SerializeRowData(Row row)
-        {
-            var sb = new StringBuilder();
-            sb.Append("{");
-
-            var columns = row.Columns.Select(kv => $"\"{kv.Key}\":\"{kv.Value}\"");
-            sb.Append(string.Join(",", columns));
-
-            sb.Append("}");
-            return sb.ToString();
-        }
 
         /// <summary>
         /// baca LSN terakhir dari file log
@@ -715,6 +740,13 @@ namespace mDBMS.FailureRecovery
 
         // ======================================== BUFFER MANAGER ========================================
 
+        /// <summary>
+        /// Read page from buffer. If page exists in buffer, return the page data.
+        /// Otherwise, return an empty array.
+        /// </summary>
+        /// <param name="tableName">Name of the table</param>
+        /// <param name="blockId">Block ID of the page</param>
+        /// <returns>Page data from buffer, or an empty array if not found</returns>
         public byte[] ReadFromBuffer(string tableName, int blockId)
         {
             Page? page = _bufferPool.GetPage(tableName, blockId);
@@ -727,17 +759,27 @@ namespace mDBMS.FailureRecovery
             return Array.Empty<byte>();
         }
 
+        /// <summary>
+        /// Write page to buffer pool. If the page is dirty, and the buffer pool is full,
+        /// evict the page and flush it to disk (LRU eviction).
+        /// </summary>
         public void WriteToBuffer(Page page)
         {
             Page? evictedPage = _bufferPool.AddOrUpdatePage(page);
 
+            // Auto-flush evicted dirty pages when buffer is full (LRU eviction)
             if (evictedPage != null && evictedPage.IsDirty)
             {
-                // Flush evicted dirty page to disk
+                Console.WriteLine($"[FRM BUFFER]: Evicting page {evictedPage.TableName}-{evictedPage.BlockID}, flushing to disk");
                 bool success = FlushPageToDisk(evictedPage);
                 if (success)
                 {
                     _bufferPool.MarkClean(evictedPage.TableName, evictedPage.BlockID);
+                    Console.WriteLine($"[FRM BUFFER]: Page flushed successfully");
+                }
+                else
+                {
+                    Console.Error.WriteLine($"[FRM BUFFER]: Failed to flush evicted page!");
                 }
             }
         }
@@ -747,10 +789,50 @@ namespace mDBMS.FailureRecovery
             return _bufferPool.GetDirtyPages();
         }
 
+
+        /// <summary>
+        /// Flush all dirty pages from buffer pool to disk.
+        /// </summary>
+        /// <returns>List of flushed pages</returns>
         public List<Page> FlushAll()
         {
-            return _bufferPool.FlushAll();
+            List<Page> buffers = _bufferPool.FlushDirties();
+            foreach (var page in buffers)
+            {
+                FlushPageToDisk(page);
+            }
+            return buffers;
         }
 
+         private LogOperationType ParseOperationType(string operation)
+        {
+            if (string.IsNullOrWhiteSpace(operation))
+            {
+                throw new ArgumentException("Operation type cannot be null or empty", nameof(operation));
+            }
+
+            return operation.ToUpperInvariant() switch
+            {
+                "INSERT" => LogOperationType.INSERT,
+                "UPDATE" => LogOperationType.UPDATE,
+                "DELETE" => LogOperationType.DELETE,
+                "BEGIN" => LogOperationType.BEGIN_TRANSACTION,
+                "COMMIT" => LogOperationType.COMMIT,
+                "ROLLBACK" => LogOperationType.ABORT,
+                "ABORT" => LogOperationType.ABORT,
+
+                // Alias/alternatif
+                "BEGIN TRANSACTION" => LogOperationType.BEGIN_TRANSACTION,
+                "COMMIT TRANSACTION" => LogOperationType.COMMIT,
+                "ROLLBACK TRANSACTION" => LogOperationType.ABORT,
+
+                // Checkpoint
+                "CHECKPOINT" => LogOperationType.CHECKPOINT,
+                "END CHECKPOINT" => LogOperationType.END_CHECKPOINT,
+                "END_CHECKPOINT" => LogOperationType.END_CHECKPOINT,
+
+                _ => throw new ArgumentException($"Unknown operation type: {operation}", nameof(operation))
+            };
+        }
     }
 }
