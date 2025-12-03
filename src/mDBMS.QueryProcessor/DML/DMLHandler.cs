@@ -246,27 +246,102 @@ namespace mDBMS.QueryProcessor.DML
         
         private ExecutionResult HandleInsert(string query, int transactionId)
         {
-            var data = new Dictionary<string, object>
+            // Parse query
+            Query parsedQuery = _queryOptimizer.ParseQuery(query);
+
+            // Validasi operasi write ke ccm
+            var action = new Common.Transaction.Action(
+                Common.Transaction.Action.ActionType.Write,
+                DatabaseObject.CreateTable(parsedQuery.Table),
+                transactionId,
+                query
+            );
+
+            var response = _concurrencyControlManager.ValidateObject(action);
+
+            if (!response.Allowed)
             {
-                ["example_col"] = "value"
-            };
+                _concurrencyControlManager.AbortTransaction(transactionId);
+                
+                return new ExecutionResult()
+                {
+                    Query = query,
+                    Success = false,
+                    Message = $"INSERT operation ditolak oleh CCM: {response.Reason}",
+                    TransactionId = transactionId
+                };
+            }
 
-            // ekstrak nama tabel dari query
-            string tableName = ExtractTableNameFromQuery(query, "INSERT");
+            // Pastiin ada data untuk di-insert
+            if (parsedQuery.InsertValues == null || parsedQuery.InsertValues.Count == 0)
+            {
+                return new ExecutionResult()
+                {
+                    Query = query,
+                    Success = false,
+                    Message = "Tidak ada data untuk diinsert",
+                    TransactionId = transactionId
+                };
+            }
 
-            var write = new DataWrite(tableName, data);
-            var affected = _storageManager.WriteBlock(write);
+            // Validasi kolom yang di-insert
+            if (parsedQuery.InsertColumns == null || parsedQuery.InsertColumns.Count == 0)
+            {
+                return new ExecutionResult()
+                {
+                    Query = query,
+                    Success = false,
+                    Message = "Harus ada spesifikasi kolom.",
+                    TransactionId = transactionId
+                };
+            }
 
-            // untuk INSERT, AfterImage adalah data yang baru diinsert
-            // BeforeImage null karena data belum ada sebelumnya
-            var afterImage = SerializeData(data);
+            var firstRowValues = parsedQuery.InsertValues[0];
+
+            // Validasi jumlah values sama kayak jumlah kolom
+            if (firstRowValues.Count != parsedQuery.InsertColumns.Count)
+            {
+                return new ExecutionResult()
+                {
+                    Query = query,
+                    Success = false,
+                    Message = $"Jumlah values ({firstRowValues.Count}) tidak sesuai dengan jumlah kolom ({parsedQuery.InsertColumns.Count}).",
+                    TransactionId = transactionId
+                };
+            }
+
+            // Map column names ke values
+            Dictionary<string, object> newValues = new();
+            for (int i = 0; i < parsedQuery.InsertColumns.Count; i++)
+            {
+                string columnName = parsedQuery.InsertColumns[i];
+                string val = firstRowValues[i];
+
+                if (int.TryParse(val, out int intval))
+                {
+                    newValues.Add(columnName, intval);
+                }
+                else if (float.TryParse(val, out float floatval))
+                {
+                    newValues.Add(columnName, floatval);
+                }
+                else
+                {
+                    newValues.Add(columnName, val);
+                }
+            }
+
+            // Tulis data ke sm
+            DataWrite writeRequest = new(parsedQuery.Table, newValues, null);
+            int affectedRowCount = _storageManager.WriteBlock(writeRequest);
+            var afterImage = SerializeData(newValues);
 
             return new ExecutionResult()
             {
                 Query = query,
                 Success = true,
-                Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager.",
-                TransactionId = transactionId,
+                Message = $"{affectedRowCount} row(s) ditulis melalui Storage Manager.",
+                TransactionId = transactionId
             };
         }
 
