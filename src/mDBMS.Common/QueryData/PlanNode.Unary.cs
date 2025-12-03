@@ -26,6 +26,16 @@ public sealed class FilterNode : PlanNode
         Input = input;
         Conditions = conditions;
     }
+
+    public override R AcceptVisitor<R>(IPlanNodeVisitor<R> visitor)
+    {
+        return visitor.VisitFilterNode(this);
+    }
+
+    public override void AcceptVisitor(IPlanNodeVisitor visitor)
+    {
+        visitor.VisitFilterNode(this);
+    }
 }
 
 /// <summary>
@@ -51,6 +61,16 @@ public sealed class ProjectNode : PlanNode
     {
         Input = input;
         Columns = columns;
+    }
+
+    public override R AcceptVisitor<R>(IPlanNodeVisitor<R> visitor)
+    {
+        return visitor.VisitProjectNode(this);
+    }
+
+    public override void AcceptVisitor(IPlanNodeVisitor visitor)
+    {
+        visitor.VisitProjectNode(this);
     }
 }
 
@@ -78,6 +98,16 @@ public sealed class SortNode : PlanNode
         Input = input;
         OrderBy = orderBy;
     }
+
+    public override R AcceptVisitor<R>(IPlanNodeVisitor<R> visitor)
+    {
+        return visitor.VisitSortNode(this);
+    }
+
+    public override void AcceptVisitor(IPlanNodeVisitor visitor)
+    {
+        visitor.VisitSortNode(this);
+    }
 }
 
 /// <summary>
@@ -103,5 +133,15 @@ public sealed class AggregateNode : PlanNode
     {
         Input = input;
         GroupBy = groupBy;
+    }
+
+    public override R AcceptVisitor<R>(IPlanNodeVisitor<R> visitor)
+    {
+        return visitor.VisitAggregateNode(this);
+    }
+
+    public override void AcceptVisitor(IPlanNodeVisitor visitor)
+    {
+        visitor.VisitAggregateNode(this);
     }
 }

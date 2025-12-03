@@ -31,6 +31,16 @@ public sealed class UpdateNode : PlanNode
     {
         Input = input;
     }
+
+    public override R AcceptVisitor<R>(IPlanNodeVisitor<R> visitor)
+    {
+        return visitor.VisitUpdateNode(this);
+    }
+
+    public override void AcceptVisitor(IPlanNodeVisitor visitor)
+    {
+        visitor.VisitUpdateNode(this);
+    }
 }
 
 /// <summary>
@@ -60,6 +70,16 @@ public sealed class InsertNode : PlanNode
     public InsertNode()
     {
     }
+
+    public override R AcceptVisitor<R>(IPlanNodeVisitor<R> visitor)
+    {
+        return visitor.VisitInsertNode(this);
+    }
+
+    public override void AcceptVisitor(IPlanNodeVisitor visitor)
+    {
+        visitor.VisitInsertNode(this);
+    }
 }
 
 /// <summary>
@@ -84,5 +104,15 @@ public sealed class DeleteNode : PlanNode
     public DeleteNode(PlanNode input)
     {
         Input = input;
+    }
+
+    public override R AcceptVisitor<R>(IPlanNodeVisitor<R> visitor)
+    {
+        return visitor.VisitDeleteNode(this);
+    }
+
+    public override void AcceptVisitor(IPlanNodeVisitor visitor)
+    {
+        visitor.VisitDeleteNode(this);
     }
 }

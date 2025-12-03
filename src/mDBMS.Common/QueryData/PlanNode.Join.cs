@@ -43,6 +43,16 @@ public sealed class JoinNode : PlanNode
         JoinType = joinType;
         JoinCondition = condition;
     }
+
+    public override R AcceptVisitor<R>(IPlanNodeVisitor<R> visitor)
+    {
+        return visitor.VisitJoinNode(this);
+    }
+
+    public override void AcceptVisitor(IPlanNodeVisitor visitor)
+    {
+        visitor.VisitJoinNode(this);
+    }
 }
 
 /// <summary>

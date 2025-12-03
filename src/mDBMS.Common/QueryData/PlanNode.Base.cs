@@ -62,4 +62,14 @@ public abstract class PlanNode
             PlanTree = this
         };
     }
+
+    /// <summary>
+    /// Memanggil method yang tepat pada visitor sesuai dengan tipe PlanNode.
+    /// </summary>
+    public abstract R AcceptVisitor<R>(IPlanNodeVisitor<R> visitor);
+    
+    /// <summary>
+    /// Memanggil method yang tepat pada visitor sesuai dengan tipe PlanNode.
+    /// </summary>
+    public abstract void AcceptVisitor(IPlanNodeVisitor visitor);
 }
