@@ -5,8 +5,7 @@ namespace mDBMS.Common.QueryData;
 /// Setiap node merepresentasikan satu operasi dalam eksekusi query.
 /// Tree structure memudahkan traversal, transformation, dan cost calculation.
 /// 
-/// CATATAN: Children property TIDAK ada di base class.
-/// Setiap concrete class menentukan struktur children-nya sendiri untuk type safety.
+/// Query Processor akan traverse tree ini secara rekursif menggunakan pattern matching.
 /// </summary>
 public abstract class PlanNode
 {
@@ -60,14 +59,7 @@ public abstract class PlanNode
             TotalEstimatedCost = TotalCost,
             EstimatedRows = (int)EstimatedRows,
             Strategy = OptimizerStrategy.COST_BASED,
-            PlanTree = this,
-            Steps = ToSteps()
+            PlanTree = this
         };
     }
-
-    /// <summary>
-    /// Konversi tree menjadi flat list of QueryPlanStep untuk compatibility dengan QueryProcessor.
-    /// Steps dibuat dalam urutan depth-first (bottom-up).
-    /// </summary>
-    public abstract List<QueryPlanStep> ToSteps();
 }
