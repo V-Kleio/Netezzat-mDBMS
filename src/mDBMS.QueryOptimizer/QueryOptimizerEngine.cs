@@ -21,11 +21,24 @@ namespace mDBMS.QueryOptimizer
         private readonly ICostModel _costModel;
         private readonly PlanBuilder _planBuilder;
 
+        // === Cost Constants (dari SimpleCostModel untuk penghitungan inline) ===
+        private const double CPU_COST_PER_ROW = 0.01;
+        private const double HASH_BUILD_COST_PER_ROW = 0.02;
+
         public QueryOptimizerEngine(IStorageManager storageManager, QueryOptimizerOptions? options = null)
         {
             _storageManager = storageManager;
             _costModel = new SimpleCostModel();
             _planBuilder = new PlanBuilder(storageManager, _costModel);
+        }
+
+        /// <summary>
+        /// Safe log2 calculation untuk index traversal estimation.
+        /// </summary>
+        private static double SafeLog2(double value)
+        {
+            if (value <= 0) return 0;
+            return Math.Log2(value);
         }
 
         /// <summary>
@@ -55,6 +68,14 @@ namespace mDBMS.QueryOptimizer
             if (query.Type == QueryType.UPDATE)
             {
                 return GenerateUpdatePlan(query);
+            }
+            else if (query.Type == QueryType.INSERT)
+            {
+                return GenerateInsertPlan(query);
+            }
+            else if (query.Type == QueryType.DELETE)
+            {
+                return GenerateDeletePlan(query);
             }
             // Build plan tree menggunakan PlanBuilder (heuristic-based)
             PlanNode planTree = _planBuilder.BuildPlan(query);
@@ -122,6 +143,284 @@ namespace mDBMS.QueryOptimizer
             plan.TotalEstimatedCost = plan.Steps.Sum(s => s.EstimatedCost);
             plan.EstimatedRows = (int)affectedRows;
             return plan;
+        }
+
+        /// <summary>
+        /// Generate query plan untuk INSERT statement.
+        /// </summary>
+        private QueryPlan GenerateInsertPlan(Query query)
+        {
+            var plan = new QueryPlan
+            {
+                OriginalQuery = query,
+                Strategy = OptimizerStrategy.RULE_BASED,
+                PlanTree = null
+            };
+
+            var stats = _storageManager.GetStats(query.Table);
+            int indexCount = stats.Indices.Count();
+
+            if (query.Type == QueryType.INSERT && query.InsertValues != null)
+            {
+                // INSERT ... VALUES (direct insert)
+                GenerateInsertValuesPlan(query, plan, stats, indexCount);
+            }
+            else if (query.Type == QueryType.INSERT && query.InsertFromQuery != null)
+            {
+                // INSERT ... SELECT (complex: optimize SELECT first)
+                GenerateInsertSelectPlan(query, plan, stats, indexCount);
+            }
+            else
+            {
+                throw new InvalidOperationException("Invalid INSERT query: neither VALUES nor SELECT");
+            }
+
+            return plan;
+        }
+
+        /// <summary>
+        /// Generate query plan untuk DELETE statement.
+        /// </summary>
+        private QueryPlan GenerateDeletePlan(Query query)
+        {
+            var plan = new QueryPlan
+            {
+                OriginalQuery = query,
+                Strategy = OptimizerStrategy.RULE_BASED,
+                PlanTree = null
+            };
+
+            var stats = _storageManager.GetStats(query.Table);
+            int indexCount = stats.Indices.Count();
+
+            // Calculate affected rows
+            double selectivity = string.IsNullOrWhiteSpace(query.WhereClause)
+                ? 1.0 // DELETE tanpa WHERE = delete all rows
+                : _costModel.EstimateSelectivity(query.WhereClause, stats);
+
+            double affectedRows = stats.TupleCount * selectivity;
+
+            // Detect jika ada index yang bisa digunakan untuk WHERE
+            var indexedColumns = stats.Indices.Select(i => i.Item1).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var whereColumns = SqlParserHelpers.ExtractPredicateColumns(query.WhereClause);
+            var indexedWhereCol = whereColumns.FirstOrDefault(c => indexedColumns.Contains(c));
+            bool useIndex = indexedWhereCol != null && !string.IsNullOrWhiteSpace(query.WhereClause);
+
+            // Locate rows to delete
+            plan.Steps.Add(new QueryPlanStep
+            {
+                Order = 1,
+                Operation = useIndex ? OperationType.INDEX_SEEK : OperationType.TABLE_SCAN,
+                Description = useIndex
+                    ? $"Index seek on {query.Table} using index on {indexedWhereCol} (estimated {affectedRows:F0} rows)"
+                    : $"Full table scan on {query.Table} (estimated {affectedRows:F0} rows)",
+                Table = query.Table,
+                IndexUsed = indexedWhereCol,
+                EstimatedCost = useIndex
+                    ? _costModel.EstimateIndexSeek(stats, selectivity)
+                    : _costModel.EstimateTableScan(stats),
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["predicate"] = query.WhereClause ?? "ALL ROWS",
+                    ["selectivity"] = selectivity
+                }
+            });
+
+            // Delete rows. Asumsi: tidak ada cascade untuk simplicity (bisa ditambahkan later)
+            bool hasCascade = false; // TODO: detect dari storage manager
+            double deleteCost = _costModel.EstimateDelete(affectedRows, stats.BlockingFactor, indexCount, hasCascade);
+
+            plan.Steps.Add(new QueryPlanStep
+            {
+                Order = 2,
+                Operation = OperationType.DELETE,
+                Description = $"Delete {affectedRows:F0} row(s) from {query.Table}",
+                Table = query.Table,
+                EstimatedCost = deleteCost,
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["affectedRows"] = affectedRows,
+                    ["hasCascade"] = hasCascade
+                }
+            });
+
+            // Index maintenance (jika ada index)
+            if (indexCount > 0)
+            {
+                var indexNames = stats.Indices.Select(idx => idx.Item1).ToList();
+                double indexMaintenanceCost = affectedRows * indexCount * SafeLog2(Math.Max(stats.TupleCount, 1)) * 0.7;
+
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = 3,
+                    Operation = OperationType.INDEX_MAINTENANCE,
+                    Description = $"Update {indexCount} index(es): {string.Join(", ", indexNames)}",
+                    Table = query.Table,
+                    EstimatedCost = indexMaintenanceCost,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["indices"] = indexNames,
+                        ["rowCount"] = affectedRows
+                    }
+                });
+            }
+
+            plan.TotalEstimatedCost = plan.Steps.Sum(s => s.EstimatedCost);
+            plan.EstimatedRows = (int)affectedRows;
+
+            return plan;
+        }
+
+        /// <summary>
+        /// Generate plan untuk INSERT ... VALUES.
+        /// </summary>
+        private void GenerateInsertValuesPlan(Query query, QueryPlan plan, Common.Data.Statistic stats, int indexCount)
+        {
+            int rowCount = query.InsertValues?.Count ?? 0;
+            int columnCount = query.InsertColumns?.Count ?? query.InsertValues![0].Count;
+
+            // Asumsi: ada constraints jika table memiliki index
+            bool hasConstraints = indexCount > 0;
+
+            // Validation (conceptual, tidak ada actual I/O)
+            plan.Steps.Add(new QueryPlanStep
+            {
+                Order = 1,
+                Operation = OperationType.FILTER, // reuse for validation
+                Description = $"Validate {rowCount} row(s) for INSERT into {query.Table}",
+                Table = query.Table,
+                EstimatedCost = rowCount * CPU_COST_PER_ROW * 0.1, // minimal validation cost
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["rowCount"] = rowCount,
+                    ["columnCount"] = columnCount,
+                    ["hasConstraints"] = hasConstraints
+                }
+            });
+
+            // Insert data
+            double insertCost = _costModel.EstimateInsert(rowCount, columnCount, indexCount, hasConstraints);
+            plan.Steps.Add(new QueryPlanStep
+            {
+                Order = 2,
+                Operation = OperationType.INSERT,
+                Description = rowCount > 1
+                    ? $"Batch insert {rowCount} rows into {query.Table}"
+                    : $"Insert 1 row into {query.Table}",
+                Table = query.Table,
+                EstimatedCost = insertCost,
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["values"] = query.InsertValues,
+                    ["columns"] = query.InsertColumns,
+                    ["isBatch"] = rowCount > 1
+                }
+            });
+
+            // Index maintenance (jika ada index)
+            if (indexCount > 0)
+            {
+                var indexNames = stats.Indices.Select(idx => idx.Item1).ToList();
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = 3,
+                    Operation = OperationType.INDEX_MAINTENANCE,
+                    Description = $"Update {indexCount} index(es): {string.Join(", ", indexNames)}",
+                    Table = query.Table,
+                    EstimatedCost = rowCount * indexCount * HASH_BUILD_COST_PER_ROW,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["indices"] = indexNames,
+                        ["rowCount"] = rowCount
+                    }
+                });
+            }
+
+            plan.TotalEstimatedCost = plan.Steps.Sum(s => s.EstimatedCost);
+            plan.EstimatedRows = rowCount;
+        }
+
+        /// <summary>
+        /// Generate plan untuk INSERT ... SELECT.
+        /// </summary>
+        private void GenerateInsertSelectPlan(Query query, QueryPlan plan, Common.Data.Statistic stats, int indexCount)
+        {
+            // Step 1: Optimize SELECT query
+            var selectPlan = OptimizeSelectQuery(query.InsertFromQuery!);
+            int estimatedRows = selectPlan.EstimatedRows;
+
+            // Add SELECT steps sebagai sub-plan
+            int stepOrder = 1;
+            foreach (var selectStep in selectPlan.Steps)
+            {
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = stepOrder++,
+                    Operation = selectStep.Operation,
+                    Description = $"[SELECT] {selectStep.Description}",
+                    Table = selectStep.Table,
+                    EstimatedCost = selectStep.EstimatedCost,
+                    Parameters = selectStep.Parameters
+                });
+            }
+
+            // Step 2: Insert result set
+            int columnCount = query.InsertColumns?.Count ?? query.InsertFromQuery!.SelectedColumns.Count;
+            bool hasConstraints = indexCount > 0;
+            double insertCost = _costModel.EstimateInsert(estimatedRows, columnCount, indexCount, hasConstraints);
+
+            plan.Steps.Add(new QueryPlanStep
+            {
+                Order = stepOrder++,
+                Operation = OperationType.INSERT,
+                Description = $"Insert {estimatedRows} row(s) from SELECT result into {query.Table}",
+                Table = query.Table,
+                EstimatedCost = insertCost,
+                Parameters = new Dictionary<string, object?>
+                {
+                    ["sourceQuery"] = query.InsertFromQuery,
+                    ["estimatedRows"] = estimatedRows
+                }
+            });
+
+            // Step 3: Index maintenance
+            if (indexCount > 0)
+            {
+                var indexNames = stats.Indices.Select(idx => idx.Item1).ToList();
+                plan.Steps.Add(new QueryPlanStep
+                {
+                    Order = stepOrder++,
+                    Operation = OperationType.INDEX_MAINTENANCE,
+                    Description = $"Update {indexCount} index(es): {string.Join(", ", indexNames)}",
+                    Table = query.Table,
+                    EstimatedCost = estimatedRows * indexCount * HASH_BUILD_COST_PER_ROW,
+                    Parameters = new Dictionary<string, object?>
+                    {
+                        ["indices"] = indexNames,
+                        ["rowCount"] = estimatedRows
+                    }
+                });
+            }
+
+            plan.TotalEstimatedCost = plan.Steps.Sum(s => s.EstimatedCost);
+            plan.EstimatedRows = estimatedRows;
+        }
+
+        /// <summary>
+        /// Optimasi kueri SELECT dan mengembalikan QueryPlan.
+        /// Dipakai secara internal untuk optimasi INSERT...SELECT.
+        /// </summary>
+        private QueryPlan OptimizeSelectQuery(Query selectQuery)
+        {
+            // Build plan tree for SELECT query
+            PlanNode planTree = _planBuilder.BuildPlan(selectQuery);
+            
+            // Convert to QueryPlan
+            var queryPlan = planTree.ToQueryPlan();
+            queryPlan.OriginalQuery = selectQuery;
+            queryPlan.PlanTree = planTree;
+            
+            return queryPlan;
         }
 
         /// <summary>

@@ -59,7 +59,15 @@ public abstract class PlanNode
         {
             TotalEstimatedCost = TotalCost,
             EstimatedRows = (int)EstimatedRows,
-            Strategy = OptimizerStrategy.COST_BASED
+            Strategy = OptimizerStrategy.COST_BASED,
+            PlanTree = this,
+            Steps = ToSteps()
         };
     }
+
+    /// <summary>
+    /// Konversi tree menjadi flat list of QueryPlanStep untuk compatibility dengan QueryProcessor.
+    /// Steps dibuat dalam urutan depth-first (bottom-up).
+    /// </summary>
+    public abstract List<QueryPlanStep> ToSteps();
 }

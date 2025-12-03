@@ -1,6 +1,26 @@
 namespace mDBMS.Common.QueryData;
 
 /// <summary>
+/// Tipe operasi pada query plan
+/// </summary>
+public enum OperationType {
+    TABLE_SCAN,
+    INDEX_SCAN,
+    INDEX_SEEK,
+    NESTED_LOOP_JOIN,
+    HASH_JOIN,
+    MERGE_JOIN,
+    SORT,
+    FILTER,
+    PROJECTION,
+    AGGREGATION,
+    UPDATE,
+    INSERT,
+    DELETE,
+    INDEX_MAINTENANCE
+}
+
+/// <summary>
 /// Strategy optimisasi query
 /// </summary>
 public enum OptimizerStrategy {
@@ -47,9 +67,55 @@ public class QueryPlan {
     public PlanNode? PlanTree { get; set; }
 
     /// <summary>
+    /// Daftar step dalam query plan (linear list untuk backward compatibility).
+    /// Generated dari PlanTree jika PlanTree != null.
+    /// </summary>
+    public List<QueryPlanStep> Steps { get; set; } = new List<QueryPlanStep>();
+
+    /// <summary>
     /// Waktu pembuatan query plan
     /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 }
 
+/// <summary>
+/// Step eksekusi dalam query plan
+/// </summary>
+public class QueryPlanStep {
+    /// <summary>
+    /// Urutan step
+    /// </summary>
+    public int Order { get; set; }
+
+    /// <summary>
+    /// Tipe operasi
+    /// </summary>
+    public OperationType Operation { get; set; }
+
+    /// <summary>
+    /// Deskripsi operasi
+    /// </summary>
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Tabel yang dipakai
+    /// </summary>
+    public string Table { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Index yang dipakai (jika ada)
+    /// </summary>
+    public string? IndexUsed { get; set; }
+
+    /// <summary>
+    /// Perkiraan cost operasi
+    /// </summary>
+    public double EstimatedCost { get; set; }
+
+    /// <summary>
+    /// Parameter tambahan untuk step dalam bentuk key-value agar mudah diakses Query Processor.
+    /// Gunakan referensi kolom dalam bentuk fullname: table.column
+    /// </summary>
+    public Dictionary<string, object?> Parameters { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
 
