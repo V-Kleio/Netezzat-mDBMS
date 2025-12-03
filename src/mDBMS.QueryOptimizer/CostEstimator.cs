@@ -29,33 +29,7 @@ namespace mDBMS.QueryOptimizer
             _storageManager = storageManager;
         }
 
-        /// <summary>
-        /// Perkiraan cost untuk satu langkah eksekusi
-        /// </summary>
-        public double EstimateStepCost(QueryPlanStep step, Query query) {
-            // Memakai statistik nyata dari StorageManager
-            // Merapikan indentasi
-            try {
-                var stats = TryGetStatsFromSM(step.Table) ?? CreateDefaultStats(step.Table);
-                var selectivity = EstimateSelectivity(query.WhereClause ?? string.Empty, stats);
 
-                return step.Operation switch {
-                    OperationType.TABLE_SCAN       => EstimateTableScanCost(stats),
-                    OperationType.INDEX_SCAN       => EstimateIndexScanCost(stats),
-                    OperationType.INDEX_SEEK       => EstimateIndexSeekCost(stats, selectivity),
-                    OperationType.FILTER           => EstimateFilterCost(stats),
-                    OperationType.PROJECTION       => EstimateProjectionCost(stats),
-                    OperationType.SORT             => EstimateSortCost(stats),
-                    OperationType.NESTED_LOOP_JOIN => EstimateNestedLoopJoinCost(step),
-                    OperationType.HASH_JOIN        => EstimateHashJoinCost(step),
-                    OperationType.MERGE_JOIN       => EstimateMergeJoinCost(step),
-                    _ => 100.0 // Default cost
-                };
-            } catch {
-                // If stats not available, return default cost
-                return 100.0;
-            }
-        }
 
         #region Cost Estimation Methods
 
@@ -128,12 +102,7 @@ namespace mDBMS.QueryOptimizer
         /// Estimate cost untuk nested loop join
         /// Complexity = O(n * m) dimana n dan m adalah size dari kedua tabel
         /// </summary>
-        private double EstimateNestedLoopJoinCost(QueryPlanStep step) {
-            var (leftStats, rightStats) = ResolveJoinStats(step);
-            return EstimateNestedLoopJoinCostLeftRight(leftStats, rightStats);
-        }
-
-        private double EstimateNestedLoopJoinCostLeftRight(Statistic leftStats, Statistic rightStats) {
+        public double EstimateNestedLoopJoinCost(Statistic leftStats, Statistic rightStats) {
             double leftBlocks = Math.Max(leftStats.BlockCount, 1);
             double rightBlocks = Math.Max(rightStats.BlockCount, 1);
             double leftTuples = Math.Max(leftStats.TupleCount, 0);
@@ -148,12 +117,7 @@ namespace mDBMS.QueryOptimizer
         /// Estimate cost untuk hash join
         /// Complexity = O(n + m)
         /// </summary>
-        private double EstimateHashJoinCost(QueryPlanStep step) {
-            var (leftStats, rightStats) = ResolveJoinStats(step);
-            return EstimateHashJoinCostLeftRight(leftStats, rightStats);
-        }
-
-        private double EstimateHashJoinCostLeftRight(Statistic leftStats, Statistic rightStats) {
+        public double EstimateHashJoinCost(Statistic leftStats, Statistic rightStats) {
             double leftBlocks = Math.Max(leftStats.BlockCount, 1);
             double rightBlocks = Math.Max(rightStats.BlockCount, 1);
             double leftTuples = Math.Max(leftStats.TupleCount, 0);
@@ -168,12 +132,7 @@ namespace mDBMS.QueryOptimizer
         /// Estimate cost untuk merge join
         /// Complexity = O(n + m) jika data sudah sorted
         /// </summary>
-         
-        private double EstimateMergeJoinCost(QueryPlanStep step) {
-            var (leftStats, rightStats) = ResolveJoinStats(step);
-            return EstimateMergeJoinCostLeftRight(leftStats, rightStats);
-        }
-        private double EstimateMergeJoinCostLeftRight(Statistic leftStats, Statistic rightStats) {
+        public double EstimateMergeJoinCost(Statistic leftStats, Statistic rightStats) {
             double leftBlocks = Math.Max(leftStats.BlockCount, 1);
             double rightBlocks = Math.Max(rightStats.BlockCount, 1);
             double leftTuples = Math.Max(leftStats.TupleCount, 0);
@@ -276,21 +235,6 @@ namespace mDBMS.QueryOptimizer
                 BlockingFactor = 100,
                 DistinctValues = 100
             };
-        }
-
-        private (Statistic, Statistic) ResolveJoinStats(QueryPlanStep step)
-        {
-            var left = GetParameter(step, "LeftTable") ?? step.Table;
-            var right = GetParameter(step, "RightTable") ?? step.Table;
-            var leftStats = TryGetStatsFromSM(left) ?? CreateDefaultStats(left ?? step.Table);
-            var rightStats = TryGetStatsFromSM(right) ?? CreateDefaultStats(right ?? step.Table);
-            return (leftStats, rightStats);
-        }
-
-        private static string? GetParameter(QueryPlanStep step, string param)
-        {
-            if (step.Parameters == null) return null;
-            return step.Parameters.TryGetValue(param, out var value) ? value?.ToString() : null;
         }
 
 

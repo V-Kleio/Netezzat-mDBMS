@@ -92,7 +92,7 @@ public class PlanBuilder
             {
                 TableName = tableName,
                 IndexColumn = predicateIndex,
-                SeekCondition = ParseConditions(predicate!)
+                SeekConditions = ParseConditions(predicate!)
             };
         }
 
@@ -295,7 +295,7 @@ public class PlanBuilder
         // Jika input sudah INDEX_SEEK dengan condition yang sama, skip filter
         if (input is IndexSeekNode seekNode)
         {
-            var conditionStr = string.Join(" AND ", seekNode.SeekCondition.Select(c => ConditionToString(c)));
+            var conditionStr = string.Join(" AND ", seekNode.SeekConditions.Select(c => ConditionToString(c)));
             if (conditionStr.Equals(condition, StringComparison.OrdinalIgnoreCase))
             {
                 return input; // Index seek sudah handle filtering
@@ -372,7 +372,7 @@ public class PlanBuilder
                 case IndexSeekNode seekNode:
                 {
                     var stats = GetStatsOrDefault(seekNode.TableName);
-                    var conditionStr = string.Join(" AND ", seekNode.SeekCondition.Select(c => ConditionToString(c)));
+                    var conditionStr = string.Join(" AND ", seekNode.SeekConditions.Select(c => ConditionToString(c)));
                     var selectivity = _costModel.EstimateSelectivity(conditionStr, stats);
                     seekNode.EstimatedRows = Math.Max(1, stats.TupleCount * selectivity);
                     seekNode.NodeCost = _costModel.EstimateIndexSeek(stats, selectivity);
@@ -442,7 +442,7 @@ public class PlanBuilder
     /// Parse string condition menjadi list of Condition objects.
     /// Simplistic parser untuk backward compatibility.
     /// </summary>
-    private static IEnumerable<Condition> ParseConditions(string conditionStr)
+    internal static IEnumerable<Condition> ParseConditions(string conditionStr)
     {
         if (string.IsNullOrWhiteSpace(conditionStr))
         {

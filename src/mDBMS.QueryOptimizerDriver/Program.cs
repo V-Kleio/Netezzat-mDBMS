@@ -132,8 +132,22 @@ class Program
 /// </summary>
 class MockStorageManager : IStorageManager
 {
+    // Daftar tabel yang valid/dikenali
+    private static readonly HashSet<string> _validTables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "employees",
+        "departments", 
+        "locations"
+    };
+
     public Statistic GetStats(string tableName)
     {
+        // Validasi tabel exist
+        if (!_validTables.Contains(tableName))
+        {
+            throw new InvalidOperationException($"Table '{tableName}' does not exist");
+        }
+
         // Return mock statistics untuk table "employees"
         if (tableName.Equals("employees", StringComparison.OrdinalIgnoreCase))
         {
@@ -151,7 +165,7 @@ class MockStorageManager : IStorageManager
             };
         }
 
-        // Default stats untuk tabel lain
+        // Default stats untuk tabel valid lainnya
         return new Statistic
         {
             TupleCount = 1000,
