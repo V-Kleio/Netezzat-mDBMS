@@ -286,6 +286,9 @@ namespace mDBMS.FailureRecovery.Tests
                 Console.WriteLine($"  -> Writing INSERT log entry (TxnID=1)");
                 frm.WriteLog(insertLog);
 
+                // Manually flush log buffer (since we removed auto-flush)
+                frm.FlushLogBuffer();
+
                 // Check log file exists
                 if (!File.Exists(logFilePath))
                 {
