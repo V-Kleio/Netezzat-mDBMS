@@ -23,7 +23,7 @@ namespace mDBMS.QueryProcessor.Transaction
                     Query = query,
                     Success = false,
                     Message = "Tidak ada transaksi aktif yang bisa di-ABORT.",
-                    TransactionId = null
+                    TransactionId = -1
                 };
             }
 
@@ -41,7 +41,6 @@ namespace mDBMS.QueryProcessor.Transaction
                     ? $"Transaksi {transactionId} telah di-ABORT dan UNDO berhasil." 
                     : $"Transaksi {transactionId} di-ABORT, namun UNDO gagal.",
                 TransactionId = transactionId,
-                TableName = "ABORT" 
             };
         }
     }

@@ -27,7 +27,7 @@ class IndexScanOperator : Operator
             yield break;
         }
 
-        var retrieval = new DataRetrieval(_tableName, _columns, _condition);
+        var retrieval = new DataRetrieval(_tableName, _columns, [[_condition]]);
         var rows = storageManager.ReadBlock(retrieval) ?? Enumerable.Empty<Row>();
 
         foreach (var row in rows)

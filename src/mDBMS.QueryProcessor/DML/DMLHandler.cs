@@ -142,10 +142,6 @@ namespace mDBMS.QueryProcessor.DML
                 Success = true,
                 Message = $"{affected} row(s) ditulis/diperbarui melalui Storage Manager.",
                 TransactionId = transactionId,
-                TableName = tableName,
-                AfterImage = afterImage,
-                BeforeImage = null,
-                RowIdentifier = "UNKNOWN"
             };
         }
 
@@ -217,7 +213,7 @@ namespace mDBMS.QueryProcessor.DML
             // Why are we only serializing the first rows to log????
             // Why are there 2 functions????
 
-            DataRetrieval readRequest = new DataRetrieval(parsedQuery.Table, [], condition);
+            DataRetrieval readRequest = new DataRetrieval(parsedQuery.Table, [], [[condition]]);
             var beforeImage = SerializeRowData(_storageManager.ReadBlock(readRequest).ToList().First());
 
             // We must now lock every row...
@@ -244,7 +240,7 @@ namespace mDBMS.QueryProcessor.DML
                 }
             }
 
-            DataWrite writeRequest = new(parsedQuery.Table, newValues, condition);
+            DataWrite writeRequest = new(parsedQuery.Table, newValues, [[condition]]);
             int affectedRowCount = _storageManager.WriteBlock(writeRequest);
             var afterImage = SerializeData(_storageManager.ReadBlock(readRequest).ToList().First().Columns);
 
@@ -254,10 +250,6 @@ namespace mDBMS.QueryProcessor.DML
                 Success = true,
                 Message = $"{affectedRowCount} row(s) ditulis/diperbarui melalui Storage Manager.",
                 TransactionId = transactionId,
-                TableName = parsedQuery.Table,
-                BeforeImage = beforeImage,
-                AfterImage = afterImage,
-                RowIdentifier = "UNKNOWN"
             };
         }
 
@@ -283,10 +275,6 @@ namespace mDBMS.QueryProcessor.DML
                 Success = true,
                 Message = $"{deleted} row(s) dihapus melalui Storage Manager.",
                 TransactionId = transactionId,
-                TableName = tableName,
-                BeforeImage = beforeImage,
-                AfterImage = null,
-                RowIdentifier = "UNKNOWN"
             };
         }
 

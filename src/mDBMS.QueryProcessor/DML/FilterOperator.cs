@@ -34,14 +34,14 @@ class FilterOperator : Operator
         }
 
         // Search lhs column
-        string? lhsColumn = FindMatchingColumn(input, _condition.lhs);
+        string? lhsColumn = FindMatchingColumn(input, (string) _condition.lhs);
         if (lhsColumn == null)
         {
             yield break;
         }
 
         // Determine if rhs is column or literal value
-        string? rhsColumn = FindMatchingColumn(input, _condition.rhs);
+        string? rhsColumn = FindMatchingColumn(input, (string) _condition.rhs);
         bool rhsIsColumn = rhsColumn != null;
 
         // Filter rows

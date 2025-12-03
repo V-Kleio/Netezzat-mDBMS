@@ -23,7 +23,7 @@ namespace mDBMS.QueryProcessor.Transaction
                     Query = query,
                     Success = false,
                     Message = "Tidak ada transaksi aktif yang bisa di-COMMIT.",
-                    TransactionId = null
+                    TransactionId = -1
                 };
             }
 
@@ -37,8 +37,7 @@ namespace mDBMS.QueryProcessor.Transaction
                 Query = query,
                 Success = true,
                 Message = $"Transaksi {transactionId} berhasil di-COMMIT.",
-                TransactionId = transactionId,
-                TableName = "COMMIT" 
+                TransactionId = transactionId
             };
         }
     }
