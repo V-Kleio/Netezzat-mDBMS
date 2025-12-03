@@ -2,7 +2,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\mDBMS.Common\mDBMS.Common.csproj" />
-    <ProjectReference Include="..\mDBMS.StorageManager\mDBMS.StorageManager.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
