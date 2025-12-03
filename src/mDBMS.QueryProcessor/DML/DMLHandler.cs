@@ -380,25 +380,82 @@ namespace mDBMS.QueryProcessor.DML
 
         private ExecutionResult HandleDelete(string query, int transactionId)
         {
-            // ekstrak nama tabel dari query
-            string tableName = ExtractTableNameFromQuery(query, "DELETE");
+            Query parsedQuery = _queryOptimizer.ParseQuery(query);
 
-            // untuk DELETE, harus baca data yang akan dihapus terlebih dahulu (BeforeImage)
-            var retrieval = new DataRetrieval(tableName, new[] { "*" });
-            var beforeRows = _storageManager.ReadBlock(retrieval).ToList();
+            Condition? condition = ParseCondition(parsedQuery.WhereClause);
+            if (!string.IsNullOrWhiteSpace(parsedQuery.WhereClause) && condition == null)
+            {
+                return new ExecutionResult()
+                {
+                    Query = query,
+                    Success = false,
+                    Message = "Format WHERE untuk DELETE tidak dikenali.",
+                    TransactionId = transactionId
+                };
+            }
 
-            var deletion = new DataDeletion(tableName);
-            var deleted = _storageManager.DeleteBlock(deletion);
+            var conditions = BuildConditionGroups(condition);
+            var retrieval = new DataRetrieval(parsedQuery.Table, new[] { "*" }, conditions);
+            var targetRows = _storageManager
+                .ReadBlock(retrieval)
+                .Select(row => (Row: row, Identifier: BuildRowIdentifier(row)))
+                .ToList();
 
-            // untuk DELETE, BeforeImage adalah data yang akan dihapus
-            // AfterImage null karena data sudah tidak ada setelah delete
-            string? beforeImage = beforeRows.Any() ? SerializeRowData(beforeRows.First()) : null;
+            if (targetRows.Count == 0)
+            {
+                return new ExecutionResult()
+                {
+                    Query = query,
+                    Success = true,
+                    Message = "0 row(s) cocok untuk dihapus.",
+                    TransactionId = transactionId
+                };
+            }
+
+            foreach (var (row, identifier) in targetRows)
+            {
+                var action = new Common.Transaction.Action(
+                    Common.Transaction.Action.ActionType.Write,
+                    DatabaseObject.CreateRow(identifier, parsedQuery.Table),
+                    transactionId,
+                    query
+                );
+
+                var response = _concurrencyControlManager.ValidateObject(action);
+                if (!response.Allowed)
+                {
+                    _concurrencyControlManager.AbortTransaction(transactionId);
+
+                    return new ExecutionResult()
+                    {
+                        Query = query,
+                        Success = false,
+                        Message = $"DELETE ditolak oleh CCM untuk row {identifier}: {response.Reason}",
+                        TransactionId = transactionId
+                    };
+                }
+            }
+
+            int deletedCount = _storageManager.DeleteBlock(new DataDeletion(parsedQuery.Table, conditions));
+
+            foreach (var (row, identifier) in targetRows)
+            {
+                _failureRecoveryManager.WriteLog(new ExecutionLog
+                {
+                    Operation = ExecutionLog.OperationType.DELETE,
+                    TransactionId = transactionId,
+                    TableName = parsedQuery.Table,
+                    RowIdentifier = identifier,
+                    BeforeImage = row,
+                    AfterImage = null
+                });
+            }
 
             return new ExecutionResult()
             {
                 Query = query,
                 Success = true,
-                Message = $"{deleted} row(s) dihapus melalui Storage Manager.",
+                Message = $"{deletedCount} row(s) dihapus melalui Storage Manager.",
                 TransactionId = transactionId,
             };
         }
@@ -467,6 +524,115 @@ namespace mDBMS.QueryProcessor.DML
         {
             var columns = row.Columns.Select(kv => $"\"{kv.Key}\":\"{kv.Value}\"");
             return "{" + string.Join(",", columns) + "}";
+        }
+
+        private static Condition? ParseCondition(string? whereClause)
+        {
+            if (string.IsNullOrWhiteSpace(whereClause))
+            {
+                return null;
+            }
+
+            var operations = new (string token, Condition.Operation op)[]
+            {
+                (">=", Condition.Operation.GEQ),
+                ("<=", Condition.Operation.LEQ),
+                ("<>", Condition.Operation.NEQ),
+                ("!=", Condition.Operation.NEQ),
+                (">", Condition.Operation.GT),
+                ("<", Condition.Operation.LT),
+                ("=", Condition.Operation.EQ),
+            };
+
+            foreach (var (token, op) in operations)
+            {
+                int idx = whereClause.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+                if (idx <= 0) continue;
+
+                string lhs = StripTableName(whereClause[..idx].Trim());
+                string rhs = NormalizeLiteral(whereClause[(idx + token.Length)..].Trim());
+
+                return new Condition
+                {
+                    lhs = lhs,
+                    rhs = rhs,
+                    opr = op,
+                    rel = Condition.Relation.COLUMN_AND_VALUE
+                };
+            }
+
+            return null;
+        }
+
+        private static IEnumerable<IEnumerable<Condition>>? BuildConditionGroups(Condition? condition)
+        {
+            if (condition == null)
+            {
+                return null;
+            }
+
+            return new List<IEnumerable<Condition>>
+            {
+                new List<Condition> { condition }
+            };
+        }
+
+        private string BuildRowIdentifier(Row row)
+        {
+            string? pkColumn = row.Columns.Keys.FirstOrDefault(key => key.Equals("id", StringComparison.OrdinalIgnoreCase))
+                ?? row.Columns.Keys.FirstOrDefault(key => key.EndsWith("id", StringComparison.OrdinalIgnoreCase))
+                ?? row.Columns.Keys.FirstOrDefault();
+
+            object? pkValue = null;
+            if (pkColumn != null)
+            {
+                row.Columns.TryGetValue(pkColumn, out pkValue);
+            }
+
+            string identifier = pkColumn != null
+                ? $"{StripTableName(pkColumn)}={FormatIdentifierValue(pkValue)}"
+                : $"ROW-{Guid.NewGuid()}";
+
+            if (string.IsNullOrEmpty(row.id))
+            {
+                row.id = identifier;
+            }
+
+            return identifier;
+        }
+
+        private static string StripTableName(string column)
+        {
+            if (string.IsNullOrWhiteSpace(column))
+            {
+                return column;
+            }
+
+            var parts = column.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return parts.Length == 0 ? column : parts[^1];
+        }
+
+        private static string NormalizeLiteral(string raw)
+        {
+            string trimmed = raw.Trim().TrimEnd(';');
+            return trimmed.Trim('\'', '"');
+        }
+
+        private static string FormatIdentifierValue(object? value)
+        {
+            if (value == null)
+            {
+                return "NULL";
+            }
+
+            string text = value.ToString() ?? "NULL";
+
+            if (double.TryParse(text, out _))
+            {
+                return text;
+            }
+
+            return $"'{text.Replace("'", "''")}'";
         }
     }
 }
