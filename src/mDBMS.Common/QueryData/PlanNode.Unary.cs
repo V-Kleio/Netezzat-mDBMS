@@ -32,6 +32,19 @@ public sealed class FilterNode : PlanNode
         Input = input;
         Conditions = conditions;
     }
+
+    public override List<QueryPlanStep> ToSteps()
+    {
+        var steps = Input.ToSteps();
+        steps.Add(new QueryPlanStep
+        {
+            Order = steps.Count + 1,
+            Operation = OperationType.FILTER,
+            Description = Details,
+            EstimatedCost = NodeCost
+        });
+        return steps;
+    }
 }
 
 /// <summary>
@@ -64,6 +77,19 @@ public sealed class ProjectNode : PlanNode
         Input = input;
         Columns = columns;
     }
+
+    public override List<QueryPlanStep> ToSteps()
+    {
+        var steps = Input.ToSteps();
+        steps.Add(new QueryPlanStep
+        {
+            Order = steps.Count + 1,
+            Operation = OperationType.PROJECTION,
+            Description = Details,
+            EstimatedCost = NodeCost
+        });
+        return steps;
+    }
 }
 
 /// <summary>
@@ -95,6 +121,19 @@ public sealed class SortNode : PlanNode
         Input = input;
         OrderBy = orderBy;
     }
+
+    public override List<QueryPlanStep> ToSteps()
+    {
+        var steps = Input.ToSteps();
+        steps.Add(new QueryPlanStep
+        {
+            Order = steps.Count + 1,
+            Operation = OperationType.SORT,
+            Description = Details,
+            EstimatedCost = NodeCost
+        });
+        return steps;
+    }
 }
 
 /// <summary>
@@ -124,5 +163,18 @@ public sealed class AggregateNode : PlanNode
     {
         Input = input;
         GroupBy = groupBy;
+    }
+
+    public override List<QueryPlanStep> ToSteps()
+    {
+        var steps = Input.ToSteps();
+        steps.Add(new QueryPlanStep
+        {
+            Order = steps.Count + 1,
+            Operation = OperationType.AGGREGATION,
+            Description = Details,
+            EstimatedCost = NodeCost
+        });
+        return steps;
     }
 }

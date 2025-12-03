@@ -2,7 +2,6 @@ using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
 using mDBMS.Common.Data;
 using mDBMS.QueryOptimizer;
-using mDBMS.StorageManager;
 
 namespace mDBMS.QueryOptimizerDriver;
 
@@ -38,6 +37,10 @@ class Program
 
         RunTestCase(optimizer, "Complex query dengan WHERE dan ORDER BY",
             "SELECT id, name, dept FROM employees WHERE age > 25 ORDER BY name ASC");
+
+        // Run edge case tests
+        Console.WriteLine("\n\n");
+        EdgeCaseTester.RunAllTests(optimizer);
 
         Console.WriteLine("\n=== Test Selesai ===");
     }
@@ -162,6 +165,8 @@ class MockStorageManager : IStorageManager
     // Implement required IStorageManager interface methods (not used in this driver, just stubs)
     public IEnumerable<Row> ReadBlock(DataRetrieval data_retrieval) => Enumerable.Empty<Row>();
     public int WriteBlock(DataWrite data_write) => 0;
+    public int AddBlock(DataWrite data_write) => 0;
     public int DeleteBlock(DataDeletion data_deletion) => 0;
+    public int WriteDisk(Page page) => 1;
     public void SetIndex(string table, string column, IndexType type) { }
 }

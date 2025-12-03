@@ -48,6 +48,40 @@ public sealed class JoinNode : PlanNode
         JoinType = joinType;
         JoinCondition = condition;
     }
+
+    public override List<QueryPlanStep> ToSteps()
+    {
+        // Gabungkan steps dari kedua children
+        var leftSteps = Left.ToSteps();
+        var rightSteps = Right.ToSteps();
+
+        // Renumber right steps
+        foreach (var step in rightSteps)
+        {
+            step.Order += leftSteps.Count;
+        }
+
+        var allSteps = new List<QueryPlanStep>();
+        allSteps.AddRange(leftSteps);
+        allSteps.AddRange(rightSteps);
+
+        // Tambahkan join step
+        allSteps.Add(new QueryPlanStep
+        {
+            Order = allSteps.Count + 1,
+            Operation = Algorithm switch
+            {
+                JoinAlgorithm.NestedLoop => OperationType.NESTED_LOOP_JOIN,
+                JoinAlgorithm.Hash => OperationType.HASH_JOIN,
+                JoinAlgorithm.Merge => OperationType.MERGE_JOIN,
+                _ => OperationType.NESTED_LOOP_JOIN
+            },
+            Description = Details,
+            EstimatedCost = NodeCost
+        });
+
+        return allSteps;
+    }
 }
 
 /// <summary>

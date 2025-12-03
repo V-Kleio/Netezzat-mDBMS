@@ -125,5 +125,5 @@ public interface ICostModel
     /// <param name="indexCount">Jumlah index yang perlu dimaintain</param>
     /// <param name="hasCascade">Apakah ada foreign key cascade delete</param>
     /// <returns>Estimated cost</returns>
-    double EstimatedDelete(double affectedRows, double blockingFactor, int indexCount = 0, bool hasCascade = false);
+    double EstimateDelete(double affectedRows, double blockingFactor, int indexCount = 0, bool hasCascade = false);
 }

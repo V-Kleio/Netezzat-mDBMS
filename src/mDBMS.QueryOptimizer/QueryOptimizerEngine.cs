@@ -21,11 +21,24 @@ namespace mDBMS.QueryOptimizer
         private readonly ICostModel _costModel;
         private readonly PlanBuilder _planBuilder;
 
+        // === Cost Constants (dari SimpleCostModel untuk penghitungan inline) ===
+        private const double CPU_COST_PER_ROW = 0.01;
+        private const double HASH_BUILD_COST_PER_ROW = 0.02;
+
         public QueryOptimizerEngine(IStorageManager storageManager, QueryOptimizerOptions? options = null)
         {
             _storageManager = storageManager;
             _costModel = new SimpleCostModel();
             _planBuilder = new PlanBuilder(storageManager, _costModel);
+        }
+
+        /// <summary>
+        /// Safe log2 calculation untuk index traversal estimation.
+        /// </summary>
+        private static double SafeLog2(double value)
+        {
+            if (value <= 0) return 0;
+            return Math.Log2(value);
         }
 
         /// <summary>
@@ -145,7 +158,7 @@ namespace mDBMS.QueryOptimizer
             };
 
             var stats = _storageManager.GetStats(query.Table);
-            int indexCount = stats.Indices.Count;
+            int indexCount = stats.Indices.Count();
 
             if (query.Type == QueryType.INSERT && query.InsertValues != null)
             {
@@ -178,7 +191,7 @@ namespace mDBMS.QueryOptimizer
             };
 
             var stats = _storageManager.GetStats(query.Table);
-            int indexCount = stats.Indices.Count;
+            int indexCount = stats.Indices.Count();
 
             // Calculate affected rows
             double selectivity = string.IsNullOrWhiteSpace(query.WhereClause)
@@ -391,6 +404,23 @@ namespace mDBMS.QueryOptimizer
 
             plan.TotalEstimatedCost = plan.Steps.Sum(s => s.EstimatedCost);
             plan.EstimatedRows = estimatedRows;
+        }
+
+        /// <summary>
+        /// Optimasi kueri SELECT dan mengembalikan QueryPlan.
+        /// Dipakai secara internal untuk optimasi INSERT...SELECT.
+        /// </summary>
+        private QueryPlan OptimizeSelectQuery(Query selectQuery)
+        {
+            // Build plan tree for SELECT query
+            PlanNode planTree = _planBuilder.BuildPlan(selectQuery);
+            
+            // Convert to QueryPlan
+            var queryPlan = planTree.ToQueryPlan();
+            queryPlan.OriginalQuery = selectQuery;
+            queryPlan.PlanTree = planTree;
+            
+            return queryPlan;
         }
 
         /// <summary>
