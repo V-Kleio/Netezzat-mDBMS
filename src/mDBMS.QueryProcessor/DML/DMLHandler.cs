@@ -43,7 +43,7 @@ namespace mDBMS.QueryProcessor.DML
         {
             Query parsedQuery = _queryOptimizer.ParseQuery(query);
 
-            // Meminta izin read dari Concurrency Control Manager
+            // Validasi Read permission ke CCM
             var action = new Common.Transaction.Action(
                 Common.Transaction.Action.ActionType.Read,
                 DatabaseObject.CreateRow("ANY", parsedQuery.Table),
@@ -51,13 +51,11 @@ namespace mDBMS.QueryProcessor.DML
                 query
             );
 
-            // validasi ke Concurrency Control Manager
             var response = _concurrencyControlManager.ValidateObject(action);
 
             if (!response.Allowed)
             {
                 _concurrencyControlManager.AbortTransaction(transactionId);
-
                 return new ExecutionResult()
                 {
                     Query = query,
@@ -67,58 +65,185 @@ namespace mDBMS.QueryProcessor.DML
                 };
             }
 
+            // Dapatkan Query Plan dari Optimizer
             QueryPlan queryPlan = _queryOptimizer.OptimizeQuery(parsedQuery);
+            IEnumerable<Row> resultData = Enumerable.Empty<Row>();
 
-            LocalTableStorage storage = new LocalTableStorage();
-
-            foreach (QueryPlanStep step in queryPlan.Steps)
+            try 
             {
-                Operator? op = step.Operation switch
+                if (queryPlan.PlanTree != null)
                 {
-                    OperationType.TABLE_SCAN => new TableScanOperator(_storageManager, step, storage),
-                    OperationType.INDEX_SCAN => new IndexScanOperator(_storageManager, step, storage),
-                    OperationType.INDEX_SEEK => new IndexSeekOperator(_storageManager, step, storage),
-                    OperationType.FILTER => new FilterOperator(_storageManager, step, storage),
-                    OperationType.PROJECTION => new ProjectionOperator(_storageManager, step, storage),
-                    OperationType.NESTED_LOOP_JOIN => new NestedLoopJoinOperator(_storageManager, step, storage),
-                    OperationType.HASH_JOIN => new HashJoinOperator(_storageManager, step, storage),
-                    OperationType.MERGE_JOIN => new MergeJoinOperator(_storageManager, step, storage),
-                    OperationType.SORT => new MergeSortOperator(_storageManager, step, storage),
-                    _ => null
-                };
+                    // Eksekusi menggunakan PlanTree (Recursive/Pipeline)
+                    resultData = ExecuteNode(queryPlan.PlanTree);
+                }
+                else
+                {
+                    // Fallback ke linear steps jika PlanTree null
+                    LocalTableStorage storage = new LocalTableStorage();
+                    foreach (QueryPlanStep step in queryPlan.Steps)
+                    {
+                        Operator? op = CreateOperator(step, storage);
+                        if (op == null) throw new Exception($"Operasi {step.Operation} tidak didukung.");
 
-                if (op == null) return new ExecutionResult()
+                        IEnumerable<Row> result = op.GetRows();
+                        
+                        // Update pipeline storage
+                        LocalTableStorage oldStorage = storage;
+                        storage = new LocalTableStorage();
+                        if (!op.usePreviousTable) storage.holdStorage = oldStorage.lastResult;
+                        storage.lastResult = result;
+                    }
+                    resultData = storage.lastResult;
+                }
+            }
+            catch (Exception ex)
+            {
+                return new ExecutionResult()
                 {
                     Query = query,
                     Success = false,
-                    Message = $"Operasi {step.Operation} untuk SELECT tidak didukung.",
+                    Message = $"Error saat eksekusi: {ex.Message}",
                     TransactionId = transactionId
                 };
-
-                IEnumerable<Row> result = op.GetRows();
-
-                LocalTableStorage oldStorage = storage;
-                storage = new LocalTableStorage();
-
-                if (!op.usePreviousTable)
-                {
-                    storage.holdStorage = oldStorage.lastResult;
-                }
-
-                storage.lastResult = result;
             }
 
-            // SELECT tidak perlu dilog karena tidak mengubah data, tapi tetap isi TransactionId
             return new ExecutionResult()
             {
                 Query = query,
                 Success = true,
-                Message = $"",
-                Data = storage.lastResult,
+                Message = "Query berhasil dieksekusi.",
+                Data = resultData,
                 TransactionId = transactionId
             };
         }
 
+        // Eksekusi node secara rekursif (Pipeline)
+        private IEnumerable<Row> ExecuteNode(PlanNode node)
+        {
+            IEnumerable<Row>? inputRows = null;
+            IEnumerable<Row>? leftRows = null;
+            IEnumerable<Row>? rightRows = null;
+
+            // Rekursif ke child nodes terlebih dahulu
+            if (node is FilterNode fn) inputRows = ExecuteNode(fn.Input);
+            else if (node is ProjectNode pn) inputRows = ExecuteNode(pn.Input);
+            else if (node is SortNode sn) inputRows = ExecuteNode(sn.Input);
+            else if (node is AggregateNode an) inputRows = ExecuteNode(an.Input);
+            else if (node is JoinNode jn)
+            {
+                leftRows = ExecuteNode(jn.Left);
+                rightRows = ExecuteNode(jn.Right);
+            }
+
+            // Siapkan storage sementara untuk operator
+            var tempStorage = new LocalTableStorage();
+            
+            if (inputRows != null) 
+            {
+                tempStorage.lastResult = inputRows; 
+            }
+            else if (leftRows != null && rightRows != null)
+            {
+                // Masukkan hasil join ke storage (Left->Hold, Right->Last)
+                tempStorage.holdStorage = leftRows;
+                tempStorage.lastResult = rightRows;
+            }
+
+            // Konversi Node ke Step agar kompatibel dengan Operator lama
+            QueryPlanStep step = CreateStepFromNode(node);
+
+            // Jalankan Operator
+            Operator? op = CreateOperator(step, tempStorage);
+            
+            if (op == null) throw new InvalidOperationException($"Operator untuk {node.GetType().Name} tidak ditemukan.");
+
+            return op.GetRows();
+        }
+
+        // Factory untuk membuat instance Operator
+        private Operator? CreateOperator(QueryPlanStep step, LocalTableStorage storage)
+        {
+            return step.Operation switch
+            {
+                OperationType.TABLE_SCAN => new TableScanOperator(_storageManager, step, storage),
+                OperationType.INDEX_SCAN => new IndexScanOperator(_storageManager, step, storage),
+                OperationType.INDEX_SEEK => new IndexSeekOperator(_storageManager, step, storage),
+                OperationType.FILTER => new FilterOperator(_storageManager, step, storage),
+                OperationType.PROJECTION => new ProjectionOperator(_storageManager, step, storage),
+                OperationType.NESTED_LOOP_JOIN => new NestedLoopJoinOperator(_storageManager, step, storage),
+                OperationType.HASH_JOIN => new HashJoinOperator(_storageManager, step, storage),
+                OperationType.MERGE_JOIN => new MergeJoinOperator(_storageManager, step, storage),
+                OperationType.SORT => new MergeSortOperator(_storageManager, step, storage),
+                _ => null
+            };
+        }
+
+        // Mapping dari PlanNode (Tree) ke QueryPlanStep (Flat)
+        private QueryPlanStep CreateStepFromNode(PlanNode node)
+        {
+            var step = new QueryPlanStep
+            {
+                EstimatedCost = node.NodeCost,
+                Description = node.Details
+            };
+
+            switch (node)
+            {
+                case TableScanNode tsn:
+                    step.Operation = OperationType.TABLE_SCAN;
+                    step.Table = tsn.TableName;
+                    step.Parameters["table"] = tsn.TableName;
+                    break;
+
+                case IndexScanNode isn:
+                    step.Operation = OperationType.INDEX_SCAN;
+                    step.Table = isn.TableName;
+                    step.IndexUsed = isn.IndexColumn;
+                    step.Parameters["table"] = isn.TableName;
+                    step.Parameters["indexColumn"] = isn.IndexColumn;
+                    break;
+
+                case IndexSeekNode isn:
+                    step.Operation = OperationType.INDEX_SEEK;
+                    step.Table = isn.TableName;
+                    step.IndexUsed = isn.IndexColumn;
+                    step.Parameters["table"] = isn.TableName;
+                    step.Parameters["indexColumn"] = isn.IndexColumn;
+                    if (isn.SeekCondition.Any()) step.Parameters["condition"] = isn.SeekCondition.First();
+                    break;
+
+                case FilterNode fn:
+                    step.Operation = OperationType.FILTER;
+                    if (fn.Conditions.Any()) step.Parameters["Condition"] = fn.Conditions.First();
+                    break;
+
+                case ProjectNode pn:
+                    step.Operation = OperationType.PROJECTION;
+                    step.Parameters["columns"] = pn.Columns;
+                    break;
+
+                case SortNode sn:
+                    step.Operation = OperationType.SORT;
+                    step.Parameters["orderBy"] = sn.OrderBy.Select(o => new Dictionary<string, object?> {
+                        { "column", o.Column },
+                        { "ascending", o.IsAscending }
+                    }).ToList();
+                    break;
+
+                case JoinNode jn:
+                    step.Operation = jn.Algorithm switch {
+                        JoinAlgorithm.Hash => OperationType.HASH_JOIN,
+                        JoinAlgorithm.Merge => OperationType.MERGE_JOIN,
+                        _ => OperationType.NESTED_LOOP_JOIN
+                    };
+                    step.Parameters["on"] = $"{jn.JoinCondition.lhs}={jn.JoinCondition.rhs}";
+                    step.Table = ""; // Kosongkan table agar pakai hasil previous
+                    break;
+            }
+
+            return step;
+        }
+        
         private ExecutionResult HandleInsert(string query, int transactionId)
         {
             var data = new Dictionary<string, object>
