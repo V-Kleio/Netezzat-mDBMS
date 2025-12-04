@@ -182,7 +182,6 @@ namespace mDBMS.StorageManager
                     byte[] newBlock = BlockSerializer.CreateBlock(rawRows);
                     fs.Write(newBlock, 0, newBlock.Length);
                 }
-            }
 
             // 4. Update Index karena offset dinamis
             UpdateIndexes(tableName, rowObj, targetBlockOffset);
