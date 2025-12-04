@@ -50,7 +50,7 @@ namespace mDBMS.QueryProcessor.DML
                 _ => HandleUnrecognized(query, transactionId)
             };
 
-            if (temporaryTransaction)
+            if (temporaryTransaction && result.TransactionId != -1)
             {
                 _concurrencyControlManager.CommitTransaction(transactionId);
                 _failureRecoveryManager.WriteLog(new()
@@ -60,6 +60,8 @@ namespace mDBMS.QueryProcessor.DML
                     TableName = "",
                     RowIdentifier = "",
                 });
+
+                result.TransactionId = -1;
             }
 
             return result;
