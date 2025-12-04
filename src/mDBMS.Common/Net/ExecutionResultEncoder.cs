@@ -1,5 +1,6 @@
 using mDBMS.Common.Transaction;
 using System.Text;
+using System.Text.Json;
 
 namespace mDBMS.Common.Net
 {
@@ -7,50 +8,10 @@ namespace mDBMS.Common.Net
     {
         public byte[] Encode(ExecutionResult result)
         {
-            using (var memoryStream = new MemoryStream())
-            using (var writer = new BinaryWriter(memoryStream, Encoding.UTF8))
-            {
-                writer.Write(result.Success);
-                writer.Write(result.Message ?? string.Empty);
+            var payload = new ExecutionResultPayload(result);
+            string data = JsonSerializer.Serialize(payload);
 
-                // temp commented soalnya executionresult gada transac id
-                // writer.Write(result.TransactionId.HasValue);
-                // if (result.TransactionId.HasValue)
-                // {
-                //     writer.Write(result.TransactionId.Value);
-                // }
-
-                if (result.Data != null)
-                {
-                    var rows = result.Data.ToList();
-                    writer.Write(rows.Count);
-
-                    foreach (var row in rows)
-                    {
-                        writer.Write(row.Columns.Count);
-                        foreach (var pair in row.Columns)
-                        {
-                            writer.Write(pair.Key);
-
-                            if (pair.Value == null)
-                            {
-                                writer.Write("null");
-                            }
-                            else
-                            {
-                                writer.Write(pair.Value.GetType().ToString());
-                                writer.Write(pair.Value.ToString() ?? string.Empty);
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    writer.Write(0); // No rows
-                }
-
-                return memoryStream.ToArray();
-            }
+            return Encoding.UTF8.GetBytes(data);
         }
     }
 }

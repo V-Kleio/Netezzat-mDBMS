@@ -1,28 +1,25 @@
 using mDBMS.Common.Data;
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
+
 namespace mDBMS.QueryProcessor.DML;
 
-/// <summary>
-/// Kelas dasar untuk semua operator dalam pemrosesan query DML.
-/// </summary>
-internal abstract class Operator
+public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
-    protected IStorageManager storageManager;
-    protected QueryPlanStep queryPlanStep;
-    protected LocalTableStorage localTableStorage;
-    public bool usePreviousTable = false;
+    private IStorageManager storageManager;
+    private IConcurrencyControlManager concurrencyControlManager;
+    private IFailureRecoveryManager failureRecoveryManager;
+    private int transactionId;
 
-    public Operator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
-    {
+    public Operator(
+        IStorageManager storageManager,
+        IFailureRecoveryManager failureRecoveryManager,
+        IConcurrencyControlManager concurrencyControlManager,
+        int transactionId
+    ) {
         this.storageManager = storageManager;
-        this.queryPlanStep = queryPlanStep;
-        this.localTableStorage = localTableStorage;
+        this.failureRecoveryManager = failureRecoveryManager;
+        this.concurrencyControlManager = concurrencyControlManager;
+        this.transactionId = transactionId;
     }
-
-    /// <summary>
-    /// Menghasilkan semua baris hasil operator ini.
-    /// </summary>
-    /// <returns>Enumerable semua baris</returns>
-    public abstract IEnumerable<Row> GetRows();
 }

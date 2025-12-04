@@ -1,164 +1,61 @@
-using mDBMS.Common.Interfaces;
-using mDBMS.Common.QueryData;
 using mDBMS.Common.Data;
+using mDBMS.Common.QueryData;
+
 namespace mDBMS.QueryProcessor.DML;
 
-class FilterOperator : Operator
+public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
-    private Condition? _condition;
-
-    public FilterOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
-        : base(storageManager, queryPlanStep, localTableStorage)
+    public IEnumerable<Row> VisitFilterNode(FilterNode node)
     {
-        // Inisialisasi state (Usahakan semua state dimuat dalam GetRows)
-        this.usePreviousTable = true;
-
-        // Extract condition from parameters
-        if (queryPlanStep.Parameters.TryGetValue("Condition", out var ConditionObj) && ConditionObj is Condition condition)
+        foreach (Row row in node.Input.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId)))
         {
-            _condition = condition;
-        }
-        else
-        {
-            // Parse from description jika tidak ada di parameters
-            _condition = ParseConditionFromDescription(queryPlanStep.Description);
-        }
-    }
+            bool matches = true;
 
-    public override IEnumerable<Row> GetRows()
-    {
-        var input = localTableStorage.lastResult;
-        if (input == null || _condition == null)
-        {
-            yield break;
-        }
-
-        // Search lhs column
-        string? lhsColumn = FindMatchingColumn(input, _condition.lhs);
-        if (lhsColumn == null)
-        {
-            yield break;
-        }
-
-        // Determine if rhs is column or literal value
-        string? rhsColumn = FindMatchingColumn(input, _condition.rhs);
-        bool rhsIsColumn = rhsColumn != null;
-
-        // Filter rows
-        foreach (var row in input)
-        {
-            if (row == null)
+            foreach (Condition condition in node.Conditions)
             {
-                continue;
+                object lhs;
+                object rhs;
+
+                switch (condition.rel)
+                {
+                    case Condition.Relation.COLUMN_AND_VALUE:
+                        lhs = row[(string) condition.lhs];
+                        rhs = condition.rhs;
+                    break;
+                    case Condition.Relation.VALUE_AND_COLUMN:
+                        lhs = condition.lhs;
+                        rhs = row[(string) condition.rhs];
+                    break;
+                    case Condition.Relation.COLUMN_AND_COLUMN:
+                        lhs = row[(string) condition.lhs];
+                        rhs = row[(string) condition.rhs];
+                    break;
+                    default:
+                        throw new Exception("unknown condition relation");
+                }
+
+                bool valid = condition.opr switch
+                {
+                    Condition.Operation.EQ => lhs == rhs,
+                    Condition.Operation.GT => ((IComparable) lhs).CompareTo(rhs) > 0,
+                    Condition.Operation.LT => ((IComparable) lhs).CompareTo(rhs) < 0,
+                    Condition.Operation.NEQ => lhs != rhs,
+                    Condition.Operation.GEQ => ((IComparable) lhs).CompareTo(rhs) >= 0,
+                    Condition.Operation.LEQ => ((IComparable) lhs).CompareTo(rhs) <= 0,
+                    _ => throw new Exception("unknown condition operator")
+                };
+
+                if (!valid)
+                {
+                    matches = false;
+                    break;
+                }
             }
 
-            object lhsValue = row.Columns[lhsColumn];
-
-            object rhsValue = rhsIsColumn ? row.Columns[rhsColumn!] : (object)_condition.rhs;
-
-            if (EvaluateCondition(lhsValue, rhsValue, _condition.opr))
+            if (matches)
             {
                 yield return row;
             }
         }
-    }
-
-    private string? FindMatchingColumn(IEnumerable<Row> rows, string target)
-    {
-        foreach (var row in rows)
-        {
-            if (row == null) continue;
-
-            foreach (var col in row.Columns.Keys)
-            {
-                if (col.Equals(target, StringComparison.OrdinalIgnoreCase))
-                    return col;
-
-                if (col.EndsWith("." + target, StringComparison.OrdinalIgnoreCase))
-                    return col;
-            }
-        }
-        return null;
-    }
-
-    private bool EvaluateCondition(object lhs, object rhs, Condition.Operation operation)
-    {
-        // Numeric comparison
-        bool lhsIsNum = double.TryParse(lhs?.ToString(), out double lnum);
-        bool rhsIsNum = double.TryParse(rhs?.ToString(), out double rnum);
-
-        if (lhsIsNum && rhsIsNum)
-        {
-            return operation switch
-            {
-                Condition.Operation.EQ => lnum == rnum,
-                Condition.Operation.NEQ => lnum != rnum,
-                Condition.Operation.GT => lnum > rnum,
-                Condition.Operation.LT => lnum < rnum,
-                Condition.Operation.GEQ => lnum >= rnum,
-                Condition.Operation.LEQ => lnum <= rnum,
-                _ => false
-            };
-        }
-        else
-        {
-            // String comparison
-            string ls = lhs?.ToString() ?? "";
-            string rs = rhs?.ToString() ?? "";
-
-            return operation switch
-            {
-                Condition.Operation.EQ => ls.Equals(rs, StringComparison.OrdinalIgnoreCase),
-                Condition.Operation.NEQ => !ls.Equals(rs, StringComparison.OrdinalIgnoreCase),
-                _ => false
-            };
-        }
-    }
-
-    private Condition? ParseConditionFromDescription(string description)
-    {
-        string expr = description.Replace("Filter:", "").Trim();
-        
-        if (string.IsNullOrWhiteSpace(expr))
-        {
-            return null;
-        }
-
-        // Parse operator
-        string[] ops = new[] {">=", "<=", "<>", "!=", "=", ">", "<"};
-        string? usedOp = ops.FirstOrDefault(op => expr.Contains(op));
-        
-        if (usedOp == null)
-        {
-            return null;
-        }
-
-        var parts = expr.Split(usedOp, 2);
-        if (parts.Length != 2)
-        {
-            return null;
-        }
-
-        string lhs = parts[0].Trim();
-        string rhsRaw = parts[1].Trim();
-        string rhs = rhsRaw.Trim('\'', '"');
-
-        var operation = usedOp switch
-        {
-            "=" => Condition.Operation.EQ,
-            "!=" or "<>" => Condition.Operation.NEQ,
-            ">" => Condition.Operation.GT,
-            "<" => Condition.Operation.LT,
-            ">=" => Condition.Operation.GEQ,
-            "<=" => Condition.Operation.LEQ,
-            _ => Condition.Operation.EQ
-        };
-
-        return new Condition
-        {
-            lhs = lhs,
-            rhs = rhs,
-            opr = operation
-        };
     }
 }

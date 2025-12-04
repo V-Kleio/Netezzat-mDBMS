@@ -79,6 +79,21 @@ public class Query {
     /// Tipe operasi query (SELECT, INSERT, UPDATE, DELETE)
     /// </summary>
     public QueryType Type { get; set; } = QueryType.SELECT;
+
+    /// <summary>
+    /// Kolom target untuk INSERT (optional, null jika semua kolom).
+    /// </summary>
+    public List<string>? InsertColumns { get; set; }
+
+    /// <summary>
+    /// List of value lists untuk multi-row INSERT. Setiap inner list adalah satu row values.
+    /// </summary>
+    public List<List<string>>? InsertValues { get; set; }
+
+    /// <summary>
+    /// Query sumber untuk INSERT ... SELECT. Jika tidak null, maka InsertValues harus null.
+    /// </summary>
+    public Query? InsertFromQuery { get; set; }
 }
 
 
