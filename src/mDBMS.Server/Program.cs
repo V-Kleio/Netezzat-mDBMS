@@ -33,13 +33,18 @@ class Server
         int connectionTimeout = 1000;
         int initialBufferSize = 4096;
 
-        IStorageManager sm = new StorageEngine();
-        IQueryOptimizer qo = new QueryOptimizerEngine(sm);
-        IConcurrencyControlManager ccm = new ConcurrencyControlManager();
-        IFailureRecoveryManager frm = new FailureRecoveryManager();
-        IQueryProcessor qp = new QueryProcessor(sm, qo, ccm, frm);
-        QueryDecoder queryDecoder = new QueryDecoder();
-        ExecutionResultEncoder resultEncoder = new ExecutionResultEncoder();
+        var qpProxy = LateProxy<IQueryProcessor>.Create();
+
+        var sm = new StorageEngine();
+        var qo = new QueryOptimizerEngine(sm);
+        var ccm = new ConcurrencyControlManager();
+        var frm = new FailureRecoveryManager(qpProxy, sm);
+        var qp = new QueryProcessor(sm, qo, ccm, frm);
+
+        var queryDecoder = new QueryDecoder();
+        var resultEncoder = new ExecutionResultEncoder();
+
+        ((LateProxy<IQueryProcessor>) qpProxy).SetTarget(qp);
 
         IPEndPoint endpoint = new(IPAddress.Loopback, port);
 
