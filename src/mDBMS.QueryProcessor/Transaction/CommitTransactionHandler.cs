@@ -29,8 +29,13 @@ namespace mDBMS.QueryProcessor.Transaction
 
             // 1. Panggil CCM untuk me-release lock dan ganti status
             _concurrencyControlManager.EndTransaction(transactionId, true);
-
-            // Kita berasumsi WriteLog untuk COMMIT sudah dipanggil di QueryProcessor.cs.
+            _failureRecoveryManager.WriteLog(new()
+            {
+                Operation = ExecutionLog.OperationType.COMMIT,
+                TransactionId = transactionId,
+                TableName = "",
+                RowIdentifier = "",
+            });
 
             return new ExecutionResult()
             {

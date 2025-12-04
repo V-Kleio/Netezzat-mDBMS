@@ -31,7 +31,7 @@ namespace mDBMS.QueryProcessor
             _handlers = new Dictionary<QueryClassification, IQueryHandler>
             {
                 { QueryClassification.Dml, new DMLHandler(_storageManager, _queryOptimizer, _concurrencyControlManager, _failureRecoveryManager) },
-                { QueryClassification.TransactionBegin, new BeginTransactionHandler(_concurrencyControlManager) },
+                { QueryClassification.TransactionBegin, new BeginTransactionHandler(_concurrencyControlManager, _failureRecoveryManager) },
                 { QueryClassification.TransactionCommit, new CommitTransactionHandler(_concurrencyControlManager, _failureRecoveryManager) },
                 { QueryClassification.TransactionAbort, new AbortTransactionHandler(_concurrencyControlManager, _failureRecoveryManager) }
             };

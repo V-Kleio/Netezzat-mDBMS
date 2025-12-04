@@ -6,10 +6,12 @@ namespace mDBMS.QueryProcessor.Transaction
     internal class BeginTransactionHandler : IQueryHandler
     {
         private readonly IConcurrencyControlManager _concurrencyControlManager;
+        private readonly IFailureRecoveryManager _failureRecoveryManager; 
 
-        public BeginTransactionHandler(IConcurrencyControlManager concurrencyControlManager)
+        public BeginTransactionHandler(IConcurrencyControlManager concurrencyControlManager, IFailureRecoveryManager failureRecoveryManager) 
         {
             _concurrencyControlManager = concurrencyControlManager;
+            _failureRecoveryManager = failureRecoveryManager; 
         }
 
         public ExecutionResult HandleQuery(string query, int transactionId)
@@ -26,6 +28,13 @@ namespace mDBMS.QueryProcessor.Transaction
             }
 
             transactionId = _concurrencyControlManager.BeginTransaction();
+            _failureRecoveryManager.WriteLog(new()
+            {
+                Operation = ExecutionLog.OperationType.BEGIN,
+                TransactionId = transactionId,
+                TableName = "",
+                RowIdentifier = "",
+            });
 
             return new ExecutionResult()
             {

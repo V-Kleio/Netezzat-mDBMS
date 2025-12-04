@@ -1,126 +1,130 @@
-using mDBMS.Common.Interfaces;
-using mDBMS.Common.QueryData;
+using System.Runtime.CompilerServices;
 using mDBMS.Common.Data;
+using mDBMS.Common.QueryData;
+
 namespace mDBMS.QueryProcessor.DML;
 
-class NestedLoopJoinOperator : Operator
+public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
-    private IEnumerable<Row>? lhs;
-    private IEnumerable<Row>? rhs;
-    private HashSet<(string, string)> joinColumns = [];
-
-    public NestedLoopJoinOperator(IStorageManager storageManager, QueryPlanStep queryPlanStep, LocalTableStorage localTableStorage)
-        : base(storageManager, queryPlanStep, localTableStorage)
+    public IEnumerable<Row> NestedLoopJoin(JoinNode node)
     {
-        // Inisialisasi state (Usahakan semua state dimuat dalam GetRows)
-        this.usePreviousTable = true;
-    }
+        IEnumerable<Row> lhs = node.Left.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId));
+        IEnumerable<Row> rhs = node.Right.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId));
 
-    public override IEnumerable<Row> GetRows()
-    {
-        if (lhs == null || rhs == null)
+        List<Row> remainder = [];
+
+        Dictionary<string, Type>? leftKeys = null;
+        Dictionary<string, Type>? rightKeys = null;
+
+        switch (node.JoinType)
         {
-            if (queryPlanStep.Table == "")
-            {
-                lhs = localTableStorage.holdStorage;
-                rhs = localTableStorage.lastResult;
-            }
-            else
-            {
-                lhs = localTableStorage.lastResult;
-                // TODO: Figure out how to fetch all columns
-                rhs = FetchRows(queryPlanStep.Table, []);
-            }
-
-            setJoinColumns((string) queryPlanStep.Parameters["on"]!);
+            case JoinType.RIGHT:
+                (lhs, rhs) = (rhs, lhs);
+                break;
+            case JoinType.FULL:
+                remainder = rhs.ToList();
+                break;
         }
 
         foreach (Row leftRow in lhs)
         {
+            bool matches = false;
+
+            if (leftKeys is null)
+            {
+                leftKeys = [];
+
+                foreach (var (key, val) in leftRow.Columns)
+                {
+                    leftKeys[key] = val.GetType();
+                }
+            }
+
             foreach (Row rightRow in rhs)
             {
-                bool matches = true;
-
-                foreach((string col1, string col2) in joinColumns)
+                if (rightKeys is null)
                 {
-                    if (leftRow.Columns[col1] != rightRow.Columns[col2])
+                    rightKeys = [];
+    
+                    foreach (var (key, val) in rightRow.Columns)
                     {
-                        matches = false;
-                        break;
+                        rightKeys[key] = val.GetType();
                     }
                 }
 
-                if (matches)
+                if (!leftRow.Columns.ContainsKey((string) node.JoinCondition.lhs))
                 {
-                    Row joinedRow = new Row();
+                    throw new Exception("join column not found on lhs");
+                }
 
-                    foreach (var attribute in leftRow.Columns)
+                if (!rightRow.Columns.ContainsKey((string) node.JoinCondition.rhs))
+                {
+                    throw new Exception("join column not found on rhs");
+                }
+
+                if (leftRow[(string) node.JoinCondition.lhs] == rightRow[(string) node.JoinCondition.rhs])
+                {
+                    matches = true;
+
+                    if (node.JoinType == JoinType.FULL)
                     {
-                        joinedRow[attribute.Key] = attribute.Value;
+                        int idx = remainder.FindIndex(row => row.id == rightRow.id);
+                        if (idx >= 0)
+                        {
+                            remainder.RemoveAt(idx);
+                        }
                     }
 
-                    foreach (var attribute in rightRow.Columns)
-                    {
-                        joinedRow[attribute.Key] = attribute.Value;
-                    }
+                    Row row = new();
                     
-                    yield return joinedRow;
-                }
-            }
-        }
-    }
-
-    private void setJoinColumns(string onString)
-    {
-        if (onString.Trim() != "")
-        {
-            List<(string, string)> joinColumns = [];
-    
-            foreach (string operation in onString.Split(',').Select(s => s.Trim()))
-            {
-                var operands = operation.Split('=').Select(s => s.Trim()).ToArray();
-    
-                if (operands.Length != 2)
-                {
-                    throw new Exception("join on operands");
-                }
-    
-                joinColumns.Add((operands[0], operands[1]));
-            }
-    
-            this.joinColumns = joinColumns.ToHashSet();
-        }
-        else
-        {
-            Row leftSample = lhs!.FirstOrDefault(new Row());
-            Row rightSample = rhs!.FirstOrDefault(new Row());
-
-            foreach (string leftAttribute in leftSample.Columns.Keys)
-            {
-                foreach (string rightAttribute in rightSample.Columns.Keys)
-                {
-                    if (leftAttribute.Split('.').Last() == rightAttribute.Split('.').Last())
+                    foreach (var (key, val) in leftRow.Columns)
                     {
-                        joinColumns.Add((leftAttribute, rightAttribute));
+                        row[key] = val;
                     }
+
+                    foreach (var (key, val) in rightRow.Columns)
+                    {
+                        row[key] = val;
+                    }
+
+                    row.id = leftRow.id + ";" + rightRow.id;
+
+                    yield return row;
                 }
             }
-        }
-    }
 
-    private IEnumerable<Row> FetchRows(string tablename, string[] columns)
-    {
-        // TODO: Refactor this to read all blocks when specifying which block to access becomes possible
-        Statistic tableStats = storageManager.GetStats(tablename);
-        for (int i = 0; i < tableStats.BlockCount; i++)
-        {
-            IEnumerable<Row> rowsInBlock = storageManager.ReadBlock(new(tablename, columns));
-            foreach (Row rawRow in rowsInBlock)
+            if (!matches && node.JoinType != JoinType.INNER)
             {
-                Row row = new();
-                foreach (var attribute in rawRow.Columns)
+                Row row = new() { id = leftRow.id };
+
+                foreach (var (key, val) in leftRow.Columns)
                 {
-                    row[tablename + "." + attribute.Key] = attribute.Value;
+                    row[key] = val;
+                }
+
+                foreach (var (key, val) in rightKeys!)
+                {
+                    row[key] = RuntimeHelpers.GetUninitializedObject(val);
+                }
+
+                yield return row;
+            }
+        }
+
+        if (remainder.Count > 0)
+        {
+            foreach (Row rem in remainder)
+            {
+                Row row = new() { id = rem.id };
+
+                foreach (var (key, val) in rem.Columns)
+                {
+                    row[key] = val;
+                }
+
+                foreach (var (key, val) in rightKeys!)
+                {
+                    row[key] = RuntimeHelpers.GetUninitializedObject(val);
                 }
 
                 yield return row;
