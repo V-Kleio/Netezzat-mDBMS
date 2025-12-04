@@ -17,9 +17,12 @@ namespace mDBMS.Common.Transaction
 
         public enum OperationType
         {
+            BEGIN,
             UPDATE,
             INSERT,
-            DELETE
+            DELETE,
+            COMMIT,
+            ABORT
         }
     }
 }

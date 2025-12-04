@@ -91,7 +91,9 @@ namespace mDBMS.StorageManager
 
         public static int CalculateRowSize(TableSchema schema)
         {
-            int size = 0;
+            // Start with row.id size: GUID (36 chars) + 1 byte length prefix = 37 bytes
+            int size = 37;
+
             foreach (var col in schema.Columns)
             {
                 size += col.Type switch
@@ -108,14 +110,13 @@ namespace mDBMS.StorageManager
         // Menghitung sisa ruang kosong dalam blok tanpa deserialize full
         public static int GetFreeSpace(byte[] blockData, int rowSize)
         {
-            // Header Blok (2 bytes) = Jumlah Record (N)
-            ushort recordCount = BitConverter.ToUInt16(blockData, 0);
+            // Read directory start pointer from block header
+            ushort directoryStart = BitConverter.ToUInt16(blockData, 2);
 
-            // Rumus Penggunaan Memori:
-            // 4 bytes (Block Header) + (N * RowSize) + (N * 2 bytes Directory Pointer)
-            int usedSpace = 4 + (recordCount * rowSize) + (recordCount * 2);
-            
-            return BlockSize - usedSpace;
+            // Calculate actual used space from directory pointer
+            int usedSpace = 4 + (BlockSize - directoryStart);
+
+            return BlockSize - usedSpace - rowSize - 2; // Space for new row + directory entry
         }
 
         // Menyisipkan Row (byte[]) ke dalam blok yang sudah ada
@@ -129,17 +130,17 @@ namespace mDBMS.StorageManager
 
             // Karena struktur Slotted Page itu rumit untuk diinsert langsung secara byte manipulation,
             // Cara teraman: Deserialize -> Add -> Serialize ulang.
-            
+
             var rows = DeserializeBlock(schema, blockData);
-            
+
             // Konversi byte[] row balik ke Object Row, kemudian rebuild block
             Row rowObj = RowSerializer.DeserializeRow(schema, newRowData);
             rows.Add(rowObj);
             byte[] newBlockBytes = CreateBlock(serializeRows(schema, rows));
-            
+
             // Salin hasil rebuild ke buffer asli
             Buffer.BlockCopy(newBlockBytes, 0, blockData, 0, BlockSize);
-            
+
             return true;
         }
 

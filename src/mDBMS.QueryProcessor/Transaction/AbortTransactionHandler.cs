@@ -23,12 +23,20 @@ namespace mDBMS.QueryProcessor.Transaction
                     Query = query,
                     Success = false,
                     Message = "Tidak ada transaksi aktif yang bisa di-ABORT.",
-                    TransactionId = null
+                    TransactionId = -1
                 };
             }
 
             // 1. Panggil CCM untuk me-release lock dan ganti status
             _concurrencyControlManager.EndTransaction(transactionId, false);
+
+            _failureRecoveryManager.WriteLog(new()
+            {
+                Operation = ExecutionLog.OperationType.ABORT,
+                TransactionId = transactionId,
+                TableName = "",
+                RowIdentifier = "",
+            });
             
             // 2. Panggil FRM untuk melakukan UNDO Recovery
             bool undoSuccess = _failureRecoveryManager.UndoTransaction(transactionId);
@@ -41,7 +49,6 @@ namespace mDBMS.QueryProcessor.Transaction
                     ? $"Transaksi {transactionId} telah di-ABORT dan UNDO berhasil." 
                     : $"Transaksi {transactionId} di-ABORT, namun UNDO gagal.",
                 TransactionId = transactionId,
-                TableName = "ABORT" 
             };
         }
     }

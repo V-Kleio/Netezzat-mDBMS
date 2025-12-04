@@ -1,3 +1,5 @@
+using mDBMS.Common.Data;
+
 namespace mDBMS.FailureRecovery
 {
     /// Enum untuk tipe operasi dalam log
@@ -19,25 +21,25 @@ namespace mDBMS.FailureRecovery
     {
         // Log Sequence Number - unique identifier untuk setiap log entry
         public long LSN { get; set; }
-        
+
         // Timestamp kapan operasi dilakukan
         public DateTime Timestamp { get; set; }
-        
+
         // Transaction ID yang melakukan operasi
         public int TransactionId { get; set; }
-        
+
         // Tipe operasi (BEGIN, COMMIT, INSERT, UPDATE, etc.)
         public LogOperationType OperationType { get; set; }
-        
+
         // Nama tabel yang terpengaruh (null untuk BEGIN/COMMIT/CHECKPOINT)
         public string? TableName { get; set; }
-        
+
         // Before Image - data sebelum perubahan (untuk UNDO)
-        public string? BeforeImage { get; set; }
-        
+        public Row? BeforeImage { get; set; }
+
         // After Image - data setelah perubahan (untuk REDO)
-        public string? AfterImage { get; set; }
-        
+        public Row? AfterImage { get; set; }
+
         // Primary Key atau Row ID yang terpengaruh
         public string? RowIdentifier { get; set; }
 
@@ -53,10 +55,10 @@ namespace mDBMS.FailureRecovery
                 OperationType.ToString(),
                 TableName ?? "NULL",
                 RowIdentifier ?? "NULL",
-                EscapeDelimiters(BeforeImage ?? "NULL"),
-                EscapeDelimiters(AfterImage ?? "NULL")
+                EscapeRow(BeforeImage),
+                EscapeRow(AfterImage)
             };
-            
+
             return string.Join("|", parts);
         }
 
@@ -64,7 +66,7 @@ namespace mDBMS.FailureRecovery
         public static LogEntry Deserialize(string logLine)
         {
             var parts = logLine.Split('|');
-            
+
             if (parts.Length < 8)
             {
                 throw new FormatException($"Invalid log format. Expected 8 parts, got {parts.Length}");
@@ -78,23 +80,68 @@ namespace mDBMS.FailureRecovery
                 OperationType = Enum.Parse<LogOperationType>(parts[3]),
                 TableName = parts[4] == "NULL" ? null : parts[4],
                 RowIdentifier = parts[5] == "NULL" ? null : parts[5],
-                BeforeImage = UnescapeDelimiters(parts[6] == "NULL" ? null : parts[6]),
-                AfterImage = UnescapeDelimiters(parts[7] == "NULL" ? null : parts[7])
+                  BeforeImage = ParseRow(Unescape(parts[6])),
+                AfterImage  = ParseRow(Unescape(parts[7]))
             };
         }
 
-        /// Escape delimiter characters dalam data
-        private string EscapeDelimiters(string? data)
+        // =======================================================
+        // ESCAPE / UNESCAPE
+        // =======================================================
+
+        private static string EscapeRow(Row? row)
         {
-            if (string.IsNullOrEmpty(data)) return "NULL";
-            return data.Replace("|", "\\|").Replace("\n", "\\n").Replace("\r", "\\r");
+            if (row == null)
+                return "NULL";
+
+            string json = SerializeRow(row);
+
+            return json
+                .Replace("\\", "\\\\")  // escape slash dulu
+                .Replace("|", "\\|")
+                .Replace("\n", "\\n")
+                .Replace("\r", "\\r");
         }
 
-        /// Unescape delimiter characters
-        private static string? UnescapeDelimiters(string? data)
+        private static string SerializeRow(Row row)
         {
-            if (string.IsNullOrEmpty(data)) return null;
-            return data.Replace("\\|", "|").Replace("\\n", "\n").Replace("\\r", "\r");
+            var cols = row.Columns.Select(kv => $"\"{kv.Key}\":\"{kv.Value}\"");
+            return "{" + string.Join(",", cols) + "}";
+        }
+
+        private static string? Unescape(string? data)
+        {
+            if (string.IsNullOrEmpty(data) || data == "NULL")
+                return null;
+
+            return data
+                .Replace("\\n", "\n")
+                .Replace("\\r", "\r")
+                .Replace("\\|", "|")
+                .Replace("\\\\", "\\"); // unescape slash terakhir
+        }
+
+        private static Row? ParseRow(string? json)
+        {
+            if (json == null)
+                return null;
+
+            var row = new Row();
+            var body = json.Trim().Trim('{', '}');
+            if (string.IsNullOrWhiteSpace(body))
+                return row;
+
+            var pairs = body.Split(',');
+
+            foreach (var pair in pairs)
+            {
+                var kv = pair.Split(':', 2);
+                var key = kv[0].Trim('"');
+                var value = kv[1].Trim('"');
+                row.Columns[key] = value;
+            }
+
+            return row;
         }
 
         /// Create log entry untuk BEGIN TRANSACTION
@@ -145,69 +192,23 @@ namespace mDBMS.FailureRecovery
             };
         }
 
-        /// Create log entry untuk UPDATE
-        public static LogEntry CreateUpdate(long lsn, int transactionId, string tableName, 
-            string rowId, string beforeImage, string afterImage)
-        {
-            return new LogEntry
-            {
-                LSN = lsn,
-                Timestamp = DateTime.Now,
-                TransactionId = transactionId,
-                OperationType = LogOperationType.UPDATE,
-                TableName = tableName,
-                RowIdentifier = rowId,
-                BeforeImage = beforeImage,
-                AfterImage = afterImage
-            };
-        }
-
-        /// Create log entry untuk INSERT
-        public static LogEntry CreateInsert(long lsn, int transactionId, string tableName, 
-            string rowId, string afterImage)
-        {
-            return new LogEntry
-            {
-                LSN = lsn,
-                Timestamp = DateTime.Now,
-                TransactionId = transactionId,
-                OperationType = LogOperationType.INSERT,
-                TableName = tableName,
-                RowIdentifier = rowId,
-                BeforeImage = null, // INSERT tidak punya before image
-                AfterImage = afterImage
-            };
-        }
-
-        /// Create log entry untuk DELETE
-        public static LogEntry CreateDelete(long lsn, int transactionId, string tableName, 
-            string rowId, string beforeImage)
-        {
-            return new LogEntry
-            {
-                LSN = lsn,
-                Timestamp = DateTime.Now,
-                TransactionId = transactionId,
-                OperationType = LogOperationType.DELETE,
-                TableName = tableName,
-                RowIdentifier = rowId,
-                BeforeImage = beforeImage,
-                AfterImage = null // DELETE tidak punya after image
-            };
-        }
-
         /// Create log entry untuk CHECKPOINT
         public static LogEntry CreateCheckpoint(long lsn, List<int> activeTransactions)
         {
+            // Simpan list txn aktif ke AfterImage dalam satu kolom
+            var row = new Row();
+            row.Columns["ActiveTransactions"] = string.Join(",", activeTransactions);
+
             return new LogEntry
             {
                 LSN = lsn,
                 Timestamp = DateTime.Now,
-                TransactionId = -1, // Checkpoint tidak terkait dengan transaksi tertentu
+                TransactionId = -1,
                 OperationType = LogOperationType.CHECKPOINT,
                 TableName = null,
                 BeforeImage = null,
-                AfterImage = string.Join(",", activeTransactions) // Simpan daftar transaksi aktif
+                AfterImage = row,
+                RowIdentifier = null
             };
         }
 
@@ -216,5 +217,60 @@ namespace mDBMS.FailureRecovery
             return $"[LSN={LSN}] [{Timestamp:yyyy-MM-dd HH:mm:ss}] [Txn={TransactionId}] " +
                    $"[Op={OperationType}] [Table={TableName ?? "N/A"}] [Row={RowIdentifier ?? "N/A"}]";
         }
+
+        // Yang dicomment itu redundant, soalnya INSERT/UPDATE/DELETE pake WriteLog (bukan WriteLogEntry) di FRM yang langsung nerima ExecutionLog
+
+        /// Create log entry untuk UPDATE
+        // public static LogEntry CreateUpdate(long lsn, int transactionId, string tableName,
+        //     string rowId, Row beforeImage, Row afterImage)
+        // {
+        //     return new LogEntry
+        //     {
+        //         LSN = lsn,
+        //         Timestamp = DateTime.Now,
+        //         TransactionId = transactionId,
+        //         OperationType = LogOperationType.UPDATE,
+        //         TableName = tableName,
+        //         RowIdentifier = rowId,
+        //         BeforeImage = beforeImage,
+        //         AfterImage = afterImage
+        //     };
+        // }
+
+        // /// Create log entry untuk INSERT
+        // public static LogEntry CreateInsert(long lsn, int transactionId, string tableName,
+        //     string rowId, Row afterImage)
+        // {
+        //     return new LogEntry
+        //     {
+        //         LSN = lsn,
+        //         Timestamp = DateTime.Now,
+        //         TransactionId = transactionId,
+        //         OperationType = LogOperationType.INSERT,
+        //         TableName = tableName,
+        //         RowIdentifier = rowId,
+        //         BeforeImage = null, // INSERT tidak punya before image
+        //         AfterImage = afterImage
+        //     };
+        // }
+
+        // /// Create log entry untuk DELETE
+        // public static LogEntry CreateDelete(long lsn, int transactionId, string tableName,
+        //     string rowId, Row beforeImage)
+        // {
+        //     return new LogEntry
+        //     {
+        //         LSN = lsn,
+        //         Timestamp = DateTime.Now,
+        //         TransactionId = transactionId,
+        //         OperationType = LogOperationType.DELETE,
+        //         TableName = tableName,
+        //         RowIdentifier = rowId,
+        //         BeforeImage = beforeImage,
+        //         AfterImage = null // DELETE tidak punya after image
+        //     };
+        // }
+
+
     }
 }

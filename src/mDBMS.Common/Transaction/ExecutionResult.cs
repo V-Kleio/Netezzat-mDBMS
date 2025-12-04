@@ -8,6 +8,7 @@ namespace mDBMS.Common.Transaction
     /// </summary>
     public class ExecutionResult
     {
+        public int TransactionId { get; set; }
         public string Query { get; set; }
         public bool Success { get; set; }
         public string Message { get; set; }

@@ -92,7 +92,7 @@ public class PlanBuilder
             {
                 TableName = tableName,
                 IndexColumn = predicateIndex,
-                SeekCondition = predicate!
+                SeekConditions = ParseConditions(predicate!)
             };
         }
 
@@ -116,7 +116,8 @@ public class PlanBuilder
         foreach (var join in query.Joins)
         {
             var rightNode = BuildBaseScan(join.RightTable, join.OnCondition, null);
-            var joinNode = new JoinNode(currNode, rightNode, join.Type, join.OnCondition)
+            var joinCondition = ParseConditions(join.OnCondition).FirstOrDefault() ?? new Condition();
+            var joinNode = new JoinNode(currNode, rightNode, join.Type, joinCondition)
             {
                 Algorithm = SelectJoinAlgorithm(currNode, join)
             };
@@ -292,12 +293,16 @@ public class PlanBuilder
     private PlanNode BuildFilter(PlanNode input, string condition)
     {
         // Jika input sudah INDEX_SEEK dengan condition yang sama, skip filter
-        if (input is IndexSeekNode seekNode && seekNode.SeekCondition == condition)
+        if (input is IndexSeekNode seekNode)
         {
-            return input; // Index seek sudah handle filtering
+            var conditionStr = string.Join(" AND ", seekNode.SeekConditions.Select(c => ConditionToString(c)));
+            if (conditionStr.Equals(condition, StringComparison.OrdinalIgnoreCase))
+            {
+                return input; // Index seek sudah handle filtering
+            }
         }
 
-        return new FilterNode(input, condition);
+        return new FilterNode(input, ParseConditions(condition));
     }
 
     /// <summary>
@@ -367,7 +372,8 @@ public class PlanBuilder
                 case IndexSeekNode seekNode:
                 {
                     var stats = GetStatsOrDefault(seekNode.TableName);
-                    var selectivity = _costModel.EstimateSelectivity(seekNode.SeekCondition, stats);
+                    var conditionStr = string.Join(" AND ", seekNode.SeekConditions.Select(c => ConditionToString(c)));
+                    var selectivity = _costModel.EstimateSelectivity(conditionStr, stats);
                     seekNode.EstimatedRows = Math.Max(1, stats.TupleCount * selectivity);
                     seekNode.NodeCost = _costModel.EstimateIndexSeek(stats, selectivity);
                     break;
@@ -376,9 +382,10 @@ public class PlanBuilder
                 {
                     CalculateCosts(filterNode.Input);
                     var stats = GetStatsForNode(filterNode.Input);
-                    var selectivity = _costModel.EstimateSelectivity(filterNode.Condition, stats);
+                    var conditionStr = string.Join(" AND ", filterNode.Conditions.Select(c => ConditionToString(c)));
+                    var selectivity = _costModel.EstimateSelectivity(conditionStr, stats);
                     filterNode.EstimatedRows = Math.Max(1, filterNode.Input.EstimatedRows * selectivity);
-                    filterNode.NodeCost = _costModel.EstimateFilter(filterNode.Input.EstimatedRows, filterNode.Condition);
+                    filterNode.NodeCost = _costModel.EstimateFilter(filterNode.Input.EstimatedRows, conditionStr);
                     break;
                 }
                 case ProjectNode projectNode:
@@ -429,5 +436,92 @@ public class PlanBuilder
             node.EstimatedRows = Math.Max(1, node.EstimatedRows == 0 ? 100 : node.EstimatedRows);
             node.NodeCost = Math.Max(1.0, node.NodeCost);
         }
+    }
+
+    /// <summary>
+    /// Parse string condition menjadi list of Condition objects.
+    /// Simplistic parser untuk backward compatibility.
+    /// </summary>
+    internal static IEnumerable<Condition> ParseConditions(string conditionStr)
+    {
+        if (string.IsNullOrWhiteSpace(conditionStr))
+        {
+            return Enumerable.Empty<Condition>();
+        }
+
+        // Split by AND/OR (simplistic approach)
+        var parts = conditionStr.Split(new[] { " AND ", " and " }, StringSplitOptions.RemoveEmptyEntries);
+        var conditions = new List<Condition>();
+
+        foreach (var part in parts)
+        {
+            var condition = ParseSingleCondition(part.Trim());
+            if (condition != null)
+            {
+                conditions.Add(condition);
+            }
+        }
+
+        return conditions;
+    }
+
+    /// <summary>
+    /// Parse single condition expression.
+    /// </summary>
+    private static Condition? ParseSingleCondition(string expr)
+    {
+        // Try to match patterns like: column = value, column > value, etc.
+        var operators = new[] { ">=", "<=", "<>", "!=", "=", ">", "<" };
+        
+        foreach (var op in operators)
+        {
+            var idx = expr.IndexOf(op, StringComparison.OrdinalIgnoreCase);
+            if (idx > 0)
+            {
+                var lhs = expr.Substring(0, idx).Trim();
+                var rhs = expr.Substring(idx + op.Length).Trim();
+                
+                var operation = op switch
+                {
+                    "=" => Condition.Operation.EQ,
+                    "!=" => Condition.Operation.NEQ,
+                    "<>" => Condition.Operation.NEQ,
+                    ">" => Condition.Operation.GT,
+                    ">=" => Condition.Operation.GEQ,
+                    "<" => Condition.Operation.LT,
+                    "<=" => Condition.Operation.LEQ,
+                    _ => Condition.Operation.EQ
+                };
+
+                return new Condition
+                {
+                    lhs = lhs,
+                    rhs = rhs,
+                    opr = operation,
+                    rel = Condition.Relation.COLUMN_AND_VALUE
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Convert Condition object to string representation.
+    /// </summary>
+    private static string ConditionToString(Condition condition)
+    {
+        var op = condition.opr switch
+        {
+            Condition.Operation.EQ => "=",
+            Condition.Operation.NEQ => "!=",
+            Condition.Operation.GT => ">",
+            Condition.Operation.GEQ => ">=",
+            Condition.Operation.LT => "<",
+            Condition.Operation.LEQ => "<=",
+            _ => "="
+        };
+
+        return $"{condition.lhs} {op} {condition.rhs}";
     }
 }

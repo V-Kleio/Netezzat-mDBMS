@@ -1,3 +1,4 @@
+using mDBMS.Common.Data;
 using mDBMS.Common.QueryData;
 using System.Text.RegularExpressions;
 
@@ -360,14 +361,8 @@ internal static class QueryRewriter
 
         return required;
     }
-}
 
-/// <summary>
-/// Heuristic optimizer yang menggunakan metrik untuk menentukan query plan terbaik.
-/// Implementasi aturan heuristik klasik untuk query optimization.
-/// </summary>
-internal static class HeuristicOptimizer
-{
+    // Helper untuk kualifikasi nama kolom dan predicate ke bentuk table.column
     /// <summary>
     /// Langkah aturan heuristik klasik yang dipakai untuk optimisasi:
     /// 1. Lakukan seleksi sedini mungkin (filter pushdown)
@@ -384,44 +379,26 @@ internal static class HeuristicOptimizer
             Strategy = OptimizerStrategy.HEURISTIC
         };
 
-        int stepOrder = 1;
+        // Build plan tree from bottom up
+        PlanNode currentNode;
 
-        // Aturan Heuristik 1: Lakukan seleksi (filter) sedini mungkin
-        // Push filter ke scan level
+        // Aturan Heuristik 1: Start with Table Scan
+        currentNode = new TableScanNode
+        {
+            TableName = query.Table
+        };
+
+        // If there's a WHERE clause, wrap in FilterNode
         if (!string.IsNullOrWhiteSpace(query.WhereClause))
         {
             // Dekomposisi kondisi konjunktif
             var conditions = QueryRewriter.SplitConjunctiveConditions(query.WhereClause);
-
-            // Untuk setiap kondisi, aplikasikan pada level scan
-            plan.Steps.Add(new QueryPlanStep
+            var condList = conditions.Select(c => ParseConditionFromString(c, query.Table)).Where(c => c != null).Cast<Condition>().ToList();
+            
+            if (condList.Count > 0)
             {
-                Order = stepOrder++,
-                Operation = OperationType.INDEX_SEEK,
-                Description = $"Early selection with filter: {query.WhereClause}",
-                Table = query.Table,
-                EstimatedCost = 0.0,
-                Parameters = new Dictionary<string, object?>
-                {
-                    ["table"] = query.Table,
-                    ["predicate"] = QualificationHelpers.QualifyPredicate(query.WhereClause!, query.Table)
-                }
-            });
-        }
-        else
-        {
-            plan.Steps.Add(new QueryPlanStep
-            {
-                Order = stepOrder++,
-                Operation = OperationType.TABLE_SCAN,
-                Description = $"Scan {query.Table}",
-                Table = query.Table,
-                EstimatedCost = 0.0,
-                Parameters = new Dictionary<string, object?>
-                {
-                    ["table"] = query.Table
-                }
-            });
+                currentNode = new FilterNode(currentNode, condList);
+            }
         }
 
         // Aturan Heuristik 3: Jika ada JOIN, pilih join order yang optimal
@@ -433,22 +410,21 @@ internal static class HeuristicOptimizer
 
             foreach (var join in orderedJoins)
             {
-                var joinOp = DetermineJoinAlgorithm(join, storageManager);
+                var joinAlg = DetermineJoinAlgorithm(join, storageManager);
                 
-                plan.Steps.Add(new QueryPlanStep
+                // Create scan for the right table
+                PlanNode rightScan = new TableScanNode
                 {
-                    Order = stepOrder++,
-                    Operation = joinOp,
-                    Description = $"{joinOp} between {join.LeftTable} and {join.RightTable} on {join.OnCondition}",
-                    Table = join.RightTable,
-                    EstimatedCost = 0.0,
-                    Parameters = new Dictionary<string, object?>
-                    {
-                        ["leftTable"] = join.LeftTable,
-                        ["rightTable"] = join.RightTable,
-                        ["on"] = join.OnCondition
-                    }
-                });
+                    TableName = join.RightTable
+                };
+
+                // Parse join condition
+                var joinCondition = ParseConditionFromString(join.OnCondition, join.LeftTable) ?? new Condition();
+
+                currentNode = new JoinNode(currentNode, rightScan, JoinType.INNER, joinCondition)
+                {
+                    Algorithm = joinAlg
+                };
             }
         }
 
@@ -456,59 +432,70 @@ internal static class HeuristicOptimizer
         // Proyeksi dilakukan setelah filter dan join, tetapi sebelum sort
         if (query.SelectedColumns.Any() && !query.SelectedColumns.Contains("*"))
         {
-            plan.Steps.Add(new QueryPlanStep
-            {
-                Order = stepOrder++,
-                Operation = OperationType.PROJECTION,
-                Description = $"Project columns: {string.Join(", ", query.SelectedColumns)}",
-                Table = query.Table,
-                EstimatedCost = 0.0,
-                Parameters = new Dictionary<string, object?>
-                {
-                    ["columns"] = QualificationHelpers.QualifyColumns(query.SelectedColumns, query.Table).ToList()
-                }
-            });
+            var cols = QualificationHelpers.QualifyColumns(query.SelectedColumns, query.Table).ToList();
+            currentNode = new ProjectNode(currentNode, cols);
         }
 
         // GROUP BY (jika ada)
         if (query.GroupBy != null && query.GroupBy.Any())
         {
-            plan.Steps.Add(new QueryPlanStep
-            {
-                Order = stepOrder++,
-                Operation = OperationType.AGGREGATION,
-                Description = $"Group by: {string.Join(", ", query.GroupBy)}",
-                Table = query.Table,
-                EstimatedCost = 0.0,
-                Parameters = new Dictionary<string, object?>
-                {
-                    ["groupBy"] = QualificationHelpers.QualifyColumns(query.GroupBy, query.Table).ToList()
-                }
-            });
+            var groupCols = QualificationHelpers.QualifyColumns(query.GroupBy, query.Table).ToList();
+            currentNode = new AggregateNode(currentNode, groupCols);
         }
 
         // ORDER BY dilakukan di akhir (paling mahal)
         if (query.OrderBy != null && query.OrderBy.Any())
         {
-            plan.Steps.Add(new QueryPlanStep
+            var orderByOps = query.OrderBy.Select(o => new OrderByOperation
             {
-                Order = stepOrder++,
-                Operation = OperationType.SORT,
-                Description = $"Sort by: {string.Join(", ", query.OrderBy.Select(o => o.Column + (o.IsAscending ? " ASC" : " DESC")))}",
-                Table = query.Table,
-                EstimatedCost = 0.0,
-                Parameters = new Dictionary<string, object?>
-                {
-                    ["orderBy"] = query.OrderBy.Select(o => new Dictionary<string, object?>
-                    {
-                        ["column"] = QualificationHelpers.QualifyColumn(o.Column, query.Table),
-                        ["ascending"] = o.IsAscending
-                    }).ToList()
-                }
-            });
+                Column = QualificationHelpers.QualifyColumn(o.Column, query.Table),
+                IsAscending = o.IsAscending
+            }).ToList();
+            currentNode = new SortNode(currentNode, orderByOps);
         }
 
+        plan.PlanTree = currentNode;
         return plan;
+    }
+
+    /// <summary>
+    /// Parse a simple condition string like "column = value" into a Condition object.
+    /// </summary>
+    private static Condition? ParseConditionFromString(string? condStr, string defaultTable)
+    {
+        if (string.IsNullOrWhiteSpace(condStr)) return null;
+
+        // Simple parsing for common operators
+        var operators = new[] { ">=", "<=", "<>", "!=", "=", ">", "<" };
+        foreach (var op in operators)
+        {
+            var idx = condStr.IndexOf(op, StringComparison.Ordinal);
+            if (idx > 0)
+            {
+                var lhs = condStr.Substring(0, idx).Trim();
+                var rhs = condStr.Substring(idx + op.Length).Trim().Trim('\'', '"');
+                
+                var operation = op switch
+                {
+                    "=" => Condition.Operation.EQ,
+                    "<>" or "!=" => Condition.Operation.NEQ,
+                    ">" => Condition.Operation.GT,
+                    ">=" => Condition.Operation.GEQ,
+                    "<" => Condition.Operation.LT,
+                    "<=" => Condition.Operation.LEQ,
+                    _ => Condition.Operation.EQ
+                };
+
+                return new Condition
+                {
+                    lhs = QualificationHelpers.QualifyColumn(lhs, defaultTable),
+                    rhs = rhs,
+                    opr = operation,
+                    rel = Condition.Relation.COLUMN_AND_VALUE
+                };
+            }
+        }
+        return null;
     }
 
     /// <summary>
@@ -560,7 +547,7 @@ internal static class HeuristicOptimizer
     /// - Jika salah satu tabel kecil: Hash Join
     /// - Default: Nested Loop Join
     /// </summary>
-    private static OperationType DetermineJoinAlgorithm(JoinOperation join, mDBMS.Common.Interfaces.IStorageManager storageManager)
+    private static JoinAlgorithm DetermineJoinAlgorithm(JoinOperation join, mDBMS.Common.Interfaces.IStorageManager storageManager)
     {
         try
         {
@@ -570,21 +557,21 @@ internal static class HeuristicOptimizer
             // Jika ada index di right table untuk join column, gunakan index
             if (rightStats.Indices.Any())
             {
-                return OperationType.NESTED_LOOP_JOIN; // bisa di-enhance dengan INDEX_NESTED_LOOP
+                return JoinAlgorithm.NestedLoop; // bisa di-enhance dengan INDEX_NESTED_LOOP
             }
 
             // Jika salah satu tabel cukup kecil (< 1000 rows), gunakan hash join
             if (leftStats.TupleCount < 1000 || rightStats.TupleCount < 1000)
             {
-                return OperationType.HASH_JOIN;
+                return JoinAlgorithm.Hash;
             }
 
             // Default: nested loop join
-            return OperationType.NESTED_LOOP_JOIN;
+            return JoinAlgorithm.NestedLoop;
         }
         catch
         {
-            return OperationType.NESTED_LOOP_JOIN;
+            return JoinAlgorithm.NestedLoop;
         }
     }
 }

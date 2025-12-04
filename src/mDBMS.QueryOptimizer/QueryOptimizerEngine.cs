@@ -21,6 +21,10 @@ namespace mDBMS.QueryOptimizer
         private readonly ICostModel _costModel;
         private readonly PlanBuilder _planBuilder;
 
+        // === Cost Constants (dari SimpleCostModel untuk penghitungan inline) ===
+        private const double CPU_COST_PER_ROW = 0.01;
+        private const double HASH_BUILD_COST_PER_ROW = 0.02;
+
         public QueryOptimizerEngine(IStorageManager storageManager, QueryOptimizerOptions? options = null)
         {
             _storageManager = storageManager;
@@ -51,10 +55,30 @@ namespace mDBMS.QueryOptimizer
         /// <param name="query">Query yang akan dioptimalkan</param>
         /// <returns>Optimized query execution plan dengan tree dan flat steps</returns>
         public QueryPlan OptimizeQuery(Query query) {
+            // Validate main table exists (will throw if table not found)
+            ValidateTableExists(query.Table);
+            
+            // Validate JOIN tables if any
+            if (query.Joins != null)
+            {
+                foreach (var join in query.Joins)
+                {
+                    ValidateTableExists(join.RightTable);
+                }
+            }
+
             // Handle UPDATE bypass
             if (query.Type == QueryType.UPDATE)
             {
                 return GenerateUpdatePlan(query);
+            }
+            else if (query.Type == QueryType.INSERT)
+            {
+                return GenerateInsertPlan(query);
+            }
+            else if (query.Type == QueryType.DELETE)
+            {
+                return GenerateDeletePlan(query);
             }
             // Build plan tree menggunakan PlanBuilder (heuristic-based)
             PlanNode planTree = _planBuilder.BuildPlan(query);
@@ -68,15 +92,23 @@ namespace mDBMS.QueryOptimizer
         }
 
         /// <summary>
-        /// Generate query plan untuk UPDATE statement.
+        /// Validate that a table exists by attempting to get its statistics.
+        /// Throws InvalidOperationException if table does not exist.
+        /// </summary>
+        private void ValidateTableExists(string tableName)
+        {
+            if (string.IsNullOrWhiteSpace(tableName))
+            {
+                throw new InvalidOperationException("Table name cannot be empty");
+            }
+            // This will throw if table doesn't exist
+            _storageManager.GetStats(tableName);
+        }
+
+        /// <summary>
+        /// Generate query plan untuk UPDATE statement using PlanNode tree.
         /// </summary>
         private QueryPlan GenerateUpdatePlan(Query query) {
-            var plan = new QueryPlan {
-                OriginalQuery = query,
-                Strategy = OptimizerStrategy.RULE_BASED,
-                PlanTree = null
-            };
-
             var stats = _storageManager.GetStats(query.Table);
             double selectivity = _costModel.EstimateSelectivity(query.WhereClause ?? "", stats);
             double affectedRows = stats.TupleCount * selectivity;
@@ -87,20 +119,41 @@ namespace mDBMS.QueryOptimizer
             var indexedWhereCol = whereColumns.FirstOrDefault(c => indexedColumns.Contains(c));
             bool useIndex = indexedWhereCol != null && !string.IsNullOrWhiteSpace(query.WhereClause);
 
-            // Cari baris (Scan/Seek)
-            plan.Steps.Add(new QueryPlanStep {
-                Order = 1,
-                Operation = useIndex ? OperationType.INDEX_SEEK : OperationType.TABLE_SCAN,
-                Description = useIndex 
-                    ? $"Index seek on {query.Table} using index on {indexedWhereCol}"
-                    : $"Full table scan on {query.Table}",
-                Table = query.Table,
-                IndexUsed = indexedWhereCol,
-                EstimatedCost = useIndex 
-                    ? _costModel.EstimateIndexSeek(stats, selectivity)
-                    : _costModel.EstimateTableScan(stats),
-                Parameters = new Dictionary<string, object?> { ["predicate"] = query.WhereClause }
-            });
+            // Build input scan node
+            PlanNode scanNode;
+            if (useIndex)
+            {
+                scanNode = new IndexSeekNode
+                {
+                    TableName = query.Table,
+                    IndexColumn = indexedWhereCol!,
+                    NodeCost = _costModel.EstimateIndexSeek(stats, selectivity),
+                    EstimatedRows = (int)affectedRows
+                };
+            }
+            else
+            {
+                scanNode = new TableScanNode
+                {
+                    TableName = query.Table,
+                    NodeCost = _costModel.EstimateTableScan(stats),
+                    EstimatedRows = (int)stats.TupleCount
+                };
+            }
+
+            // Add filter if WHERE clause exists
+            if (!string.IsNullOrWhiteSpace(query.WhereClause))
+            {
+                var conditions = PlanBuilder.ParseConditions(query.WhereClause);
+                if (conditions.Any())
+                {
+                    scanNode = new FilterNode(scanNode, conditions)
+                    {
+                        NodeCost = affectedRows * CPU_COST_PER_ROW,
+                        EstimatedRows = (int)affectedRows
+                    };
+                }
+            }
 
             // Qualify column names di UpdateOperations
             var qualifiedUpdates = query.UpdateOperations.ToDictionary(
@@ -108,20 +161,177 @@ namespace mDBMS.QueryOptimizer
                 kvp => kvp.Value
             );
 
-            // Update
-            double updateCost = _costModel.EstimateUpdate(affectedRows, stats.BlockingFactor);
-            plan.Steps.Add(new QueryPlanStep {
-                Order = 2,
-                Operation = OperationType.UPDATE,
-                Description = $"Update {query.UpdateOperations.Count} column(s) in {query.Table}",
-                Table = query.Table,
-                EstimatedCost = updateCost,
-                Parameters = new Dictionary<string, object?> { ["updates"] = qualifiedUpdates }
-            });
+            // Build UPDATE node
+            var updateNode = new UpdateNode(scanNode)
+            {
+                TableName = query.Table,
+                UpdateOperations = qualifiedUpdates,
+                NodeCost = _costModel.EstimateUpdate(affectedRows, stats.BlockingFactor),
+                EstimatedRows = (int)affectedRows
+            };
 
-            plan.TotalEstimatedCost = plan.Steps.Sum(s => s.EstimatedCost);
-            plan.EstimatedRows = (int)affectedRows;
+            var plan = new QueryPlan {
+                OriginalQuery = query,
+                Strategy = OptimizerStrategy.RULE_BASED,
+                PlanTree = updateNode,
+                TotalEstimatedCost = updateNode.TotalCost,
+                EstimatedRows = (int)affectedRows
+            };
+
             return plan;
+        }
+
+        /// <summary>
+        /// Generate query plan untuk INSERT statement using PlanNode tree.
+        /// </summary>
+        private QueryPlan GenerateInsertPlan(Query query)
+        {
+            var stats = _storageManager.GetStats(query.Table);
+            int indexCount = stats.Indices.Count();
+
+            PlanNode planTree;
+            int estimatedRows;
+
+            if (query.Type == QueryType.INSERT && query.InsertValues != null)
+            {
+                // INSERT ... VALUES (direct insert)
+                int rowCount = query.InsertValues?.Count ?? 0;
+                int columnCount = query.InsertColumns?.Count ?? query.InsertValues![0].Count;
+
+                planTree = new InsertNode
+                {
+                    TableName = query.Table,
+                    Columns = query.InsertColumns ?? new List<string>(),
+                    Values = query.InsertValues?.SelectMany(v => v).ToList() ?? new List<string>(),
+                    NodeCost = _costModel.EstimateInsert(rowCount, columnCount, indexCount, indexCount > 0),
+                    EstimatedRows = rowCount
+                };
+                estimatedRows = rowCount;
+            }
+            else if (query.Type == QueryType.INSERT && query.InsertFromQuery != null)
+            {
+                // INSERT ... SELECT (optimize SELECT first)
+                var selectPlan = OptimizeSelectQuery(query.InsertFromQuery);
+                estimatedRows = selectPlan.EstimatedRows;
+                int columnCount = query.InsertColumns?.Count ?? query.InsertFromQuery.SelectedColumns.Count;
+
+                planTree = new InsertNode
+                {
+                    TableName = query.Table,
+                    Columns = query.InsertColumns ?? query.InsertFromQuery.SelectedColumns.ToList(),
+                    NodeCost = _costModel.EstimateInsert(estimatedRows, columnCount, indexCount, indexCount > 0),
+                    EstimatedRows = estimatedRows
+                };
+            }
+            else
+            {
+                throw new InvalidOperationException("Invalid INSERT query: neither VALUES nor SELECT");
+            }
+
+            var plan = new QueryPlan
+            {
+                OriginalQuery = query,
+                Strategy = OptimizerStrategy.RULE_BASED,
+                PlanTree = planTree,
+                TotalEstimatedCost = planTree.TotalCost,
+                EstimatedRows = estimatedRows
+            };
+
+            return plan;
+        }
+
+        /// <summary>
+        /// Generate query plan untuk DELETE statement using PlanNode tree.
+        /// </summary>
+        private QueryPlan GenerateDeletePlan(Query query)
+        {
+            var stats = _storageManager.GetStats(query.Table);
+
+            // Calculate affected rows
+            double selectivity = string.IsNullOrWhiteSpace(query.WhereClause)
+                ? 1.0 // DELETE tanpa WHERE = delete all rows
+                : _costModel.EstimateSelectivity(query.WhereClause, stats);
+
+            double affectedRows = stats.TupleCount * selectivity;
+
+            // Detect jika ada index yang bisa digunakan untuk WHERE
+            var indexedColumns = stats.Indices.Select(i => i.Item1).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var whereColumns = SqlParserHelpers.ExtractPredicateColumns(query.WhereClause);
+            var indexedWhereCol = whereColumns.FirstOrDefault(c => indexedColumns.Contains(c));
+            bool useIndex = indexedWhereCol != null && !string.IsNullOrWhiteSpace(query.WhereClause);
+
+            // Build input scan node
+            PlanNode scanNode;
+            if (useIndex)
+            {
+                scanNode = new IndexSeekNode
+                {
+                    TableName = query.Table,
+                    IndexColumn = indexedWhereCol!,
+                    NodeCost = _costModel.EstimateIndexSeek(stats, selectivity),
+                    EstimatedRows = (int)affectedRows
+                };
+            }
+            else
+            {
+                scanNode = new TableScanNode
+                {
+                    TableName = query.Table,
+                    NodeCost = _costModel.EstimateTableScan(stats),
+                    EstimatedRows = (int)stats.TupleCount
+                };
+            }
+
+            // Add filter if WHERE clause exists
+            if (!string.IsNullOrWhiteSpace(query.WhereClause))
+            {
+                var conditions = PlanBuilder.ParseConditions(query.WhereClause);
+                if (conditions.Any())
+                {
+                    scanNode = new FilterNode(scanNode, conditions)
+                    {
+                        NodeCost = affectedRows * CPU_COST_PER_ROW,
+                        EstimatedRows = (int)affectedRows
+                    };
+                }
+            }
+
+            // Build DELETE node
+            int indexCount = stats.Indices.Count();
+            var deleteNode = new DeleteNode(scanNode)
+            {
+                TableName = query.Table,
+                NodeCost = _costModel.EstimateDelete(affectedRows, stats.BlockingFactor, indexCount, false),
+                EstimatedRows = (int)affectedRows
+            };
+
+            var plan = new QueryPlan
+            {
+                OriginalQuery = query,
+                Strategy = OptimizerStrategy.RULE_BASED,
+                PlanTree = deleteNode,
+                TotalEstimatedCost = deleteNode.TotalCost,
+                EstimatedRows = (int)affectedRows
+            };
+
+            return plan;
+        }
+
+        /// <summary>
+        /// Optimasi kueri SELECT dan mengembalikan QueryPlan.
+        /// Dipakai secara internal untuk optimasi INSERT...SELECT.
+        /// </summary>
+        private QueryPlan OptimizeSelectQuery(Query selectQuery)
+        {
+            // Build plan tree for SELECT query
+            PlanNode planTree = _planBuilder.BuildPlan(selectQuery);
+            
+            // Convert to QueryPlan
+            var queryPlan = planTree.ToQueryPlan();
+            queryPlan.OriginalQuery = selectQuery;
+            queryPlan.PlanTree = planTree;
+            
+            return queryPlan;
         }
 
         /// <summary>
@@ -165,206 +375,6 @@ namespace mDBMS.QueryOptimizer
         /// <summary>
         /// Generate plan dengan strategi table scan
         /// </summary>
-        private QueryPlan GenerateTableScanPlan(Query query) {
-            var plan = new QueryPlan {
-                OriginalQuery = query,
-                Strategy = OptimizerStrategy.RULE_BASED
-            };
-
-            plan.Steps.Add(new QueryPlanStep {
-                Order = 1,
-                Operation = OperationType.TABLE_SCAN,
-                Description = $"Full table scan on {query.Table}",
-                Table = query.Table,
-                EstimatedCost = 0.0, // Dihitung oleh CostEstimator
-                Parameters = new Dictionary<string, object?>
-                {
-                    ["table"] = query.Table
-                }
-            });
-
-            if (!string.IsNullOrEmpty(query.WhereClause))
-            {
-                plan.Steps.Add(new QueryPlanStep {
-                    Order = 2,
-                    Operation = OperationType.FILTER,
-                    Description = $"Apply filter: {query.WhereClause}",
-                    Table = query.Table,
-                    EstimatedCost = 0.0,
-                    Parameters = new Dictionary<string, object?>
-                    {
-                        ["predicate"] = QualifyPredicate(query.WhereClause!, query.Table)
-                    }
-                });
-            }
-
-            if (query.SelectedColumns.Any()) {
-                plan.Steps.Add(new QueryPlanStep
-                {
-                    Order = 3,
-                    Operation = OperationType.PROJECTION,
-                    Description = $"Project columns: {string.Join(", ", query.SelectedColumns)}",
-                    Table = query.Table,
-                    EstimatedCost = 0.0,
-                    Parameters = new Dictionary<string, object?>
-                    {
-                        ["columns"] = QualifyColumns(query.SelectedColumns, query.Table).ToList()
-                    }
-                });
-            }
-
-            return plan;
-        }
-
-        /// <summary>
-        /// Generate plan dengan strategi index scan
-        /// </summary>
-        private QueryPlan? GenerateIndexScanPlan(Query query) {
-            try {
-                if (string.IsNullOrWhiteSpace(query.Table)) return null;
-
-                var stats = _storageManager.GetStats(query.Table);
-                var indexedColumns = stats.Indices.Select(i => i.Item1).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                if (indexedColumns.Count == 0) return null;
-
-                var whereCols = SqlParserHelpers.ExtractPredicateColumns(query.WhereClause);
-                var orderCols = query.OrderBy?.Select(o => o.Column) ?? Enumerable.Empty<string>();
-
-                bool hasIndexForWhere = whereCols.Any(c => indexedColumns.Contains(c));
-                bool hasIndexForOrder = orderCols.Any(c => indexedColumns.Contains(c));
-
-                if (!hasIndexForWhere && !hasIndexForOrder) return null;
-
-                var plan = new QueryPlan {
-                    OriginalQuery = query,
-                    Strategy = OptimizerStrategy.COST_BASED
-                };
-
-                // Jika ada predicate yang selektif, gunakan INDEX_SEEK, else INDEX_SCAN
-                var useSeek = hasIndexForWhere && !string.IsNullOrWhiteSpace(query.WhereClause);
-
-                plan.Steps.Add(new QueryPlanStep {
-                    Order = 1,
-                    Operation = useSeek ? OperationType.INDEX_SEEK : OperationType.INDEX_SCAN,
-                    Description = useSeek
-                        ? $"Index seek on {query.Table} using predicate"
-                        : $"Index scan on {query.Table}",
-                    Table = query.Table,
-                    IndexUsed = whereCols.FirstOrDefault(c => indexedColumns.Contains(c)) ?? orderCols.FirstOrDefault(c => indexedColumns.Contains(c)),
-                    Parameters = new Dictionary<string, object?>
-                    {
-                        ["table"] = query.Table,
-                        ["indexColumn"] = QualifyColumn(whereCols.FirstOrDefault(c => indexedColumns.Contains(c)) ?? orderCols.FirstOrDefault(c => indexedColumns.Contains(c)), query.Table),
-                        ["predicate"] = string.IsNullOrWhiteSpace(query.WhereClause) ? null : QualifyPredicate(query.WhereClause!, query.Table)
-                    }
-                });
-
-                if (!string.IsNullOrWhiteSpace(query.WhereClause)) {
-                    plan.Steps.Add(new QueryPlanStep {
-                        Order = 2,
-                        Operation = OperationType.FILTER,
-                        Description = $"Apply filter: {query.WhereClause}",
-                        Table = query.Table,
-                        Parameters = new Dictionary<string, object?>
-                        {
-                            ["predicate"] = QualifyPredicate(query.WhereClause!, query.Table)
-                        }
-                    });
-                }
-
-                if (query.SelectedColumns.Any()) {
-                    plan.Steps.Add(new QueryPlanStep {
-                        Order = plan.Steps.Count + 1,
-                        Operation = OperationType.PROJECTION,
-                        Description = $"Project columns: {string.Join(", ", query.SelectedColumns)}",
-                        Table = query.Table,
-                        Parameters = new Dictionary<string, object?>
-                        {
-                            ["columns"] = QualifyColumns(query.SelectedColumns, query.Table).ToList()
-                        }
-                    });
-                }
-
-                if (query.OrderBy != null && query.OrderBy.Any()) {
-                    // Jika ada index yang sesuai untuk order by, hindari sort eksplisit
-                    if (!hasIndexForOrder) {
-                        plan.Steps.Add(new QueryPlanStep {
-                            Order = plan.Steps.Count + 1,
-                            Operation = OperationType.SORT,
-                            Description = $"Sort by: {string.Join(", ", query.OrderBy.Select(o => o.Column + (o.IsAscending ? " ASC" : " DESC")))}",
-                            Table = query.Table,
-                            Parameters = new Dictionary<string, object?>
-                            {
-                                ["orderBy"] = query.OrderBy.Select(o => new Dictionary<string, object?>
-                                {
-                                    ["column"] = QualifyColumn(o.Column, query.Table),
-                                    ["ascending"] = o.IsAscending
-                                }).ToList()
-                            }
-                        });
-                    }
-                }
-
-                return plan;
-            } catch {
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// Generate plan dengan filter pushdown optimization
-        /// </summary>
-        private QueryPlan GenerateFilterPushdownPlan(Query query) {
-            var plan = new QueryPlan {
-                OriginalQuery = query,
-                Strategy = OptimizerStrategy.HEURISTIC
-            };
-
-            // Push filter ke bawah untuk scan level untuk meningkatkan efisiensi
-            if (!string.IsNullOrEmpty(query.WhereClause)) {
-                plan.Steps.Add(new QueryPlanStep {
-                    Order = 1,
-                    Operation = OperationType.INDEX_SEEK,
-                    Description = $"Filtered scan on {query.Table} with condition: {query.WhereClause}",
-                    Table = query.Table,
-                    EstimatedCost = 0.0,
-                    Parameters = new Dictionary<string, object?>
-                    {
-                        ["table"] = query.Table,
-                        ["predicate"] = QualifyPredicate(query.WhereClause!, query.Table)
-                    }
-                });
-            } else {
-                plan.Steps.Add(new QueryPlanStep {
-                    Order = 1,
-                    Operation = OperationType.TABLE_SCAN,
-                    Description = $"Table scan on {query.Table}",
-                    Table = query.Table,
-                    EstimatedCost = 0.0,
-                    Parameters = new Dictionary<string, object?>
-                    {
-                        ["table"] = query.Table
-                    }
-                });
-            }
-
-            if (query.SelectedColumns.Any()) {
-                plan.Steps.Add(new QueryPlanStep {
-                    Order = 2,
-                    Operation = OperationType.PROJECTION,
-                    Description = $"Project columns: {string.Join(", ", query.SelectedColumns)}",
-                    Table = query.Table,
-                    EstimatedCost = 0.0,
-                    Parameters = new Dictionary<string, object?>
-                    {
-                        ["columns"] = QualifyColumns(query.SelectedColumns, query.Table).ToList()
-                    }
-                });
-            }
-
-            return plan;
-        }
 
         #region Qualification Helpers
         // Pastikan referensi kolom memakai fullname: table.column
