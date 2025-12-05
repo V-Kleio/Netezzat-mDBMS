@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using mDBMS.Common.Data;
+﻿using mDBMS.Common.Data;
 using mDBMS.Common.Interfaces;
 using mDBMS.StorageManager;
 
@@ -29,7 +26,7 @@ class StorageManagerDriver
         var requestRead = new DataRetrieval("Students", new[] { "*" }, null);
         int count = 0;
         foreach (var row in storage.ReadBlock(requestRead)) count++;
-        
+
         if (count == 50) Console.WriteLine("SUCCESS: Read Seeder (50 rows) berfungsi!\n");
         else Console.WriteLine($"ERROR: Terbaca {count} baris.\n");
 
@@ -44,15 +41,15 @@ class StorageManagerDriver
         // TEST C & I: FREE SPACE MANAGEMENT (LOGIKA WRITE First-Fit)
         // ==========================================
         Console.WriteLine("--- TEST I: Free Space Management (First-Fit Strategy) ---");
-        
+
         string studentsPath = Path.Combine(pathRoot, "students.dat");
         long sizeInitial = new FileInfo(studentsPath).Length;
-        
+
         Console.WriteLine($"Ukuran File Awal: {sizeInitial} bytes (Header + 1 Data Block)");
 
         // Logika Lama (Append): Pasti nambah 4096 bytes (jadi block baru).
         // Logika Baru (First-Fit): Harusnya masuk ke block yang sudah ada (karena block 1 belum penuh).
-        
+
         Console.WriteLine(">>> Menyisipkan Student ID 100 (Harusnya masuk ke celah kosong)...");
         var newValues = new Dictionary<string, object>
         {
@@ -66,7 +63,7 @@ class StorageManagerDriver
 
         if (sizeAfterInsert == sizeInitial)
         {
-            Console.WriteLine("SUCCESS: Ukuran file TIDAK bertambah!"); 
+            Console.WriteLine("SUCCESS: Ukuran file TIDAK bertambah!");
             Console.WriteLine("         (Data berhasil disisipkan ke blok yang ada / First-Fit working)\n");
         }
         else if (sizeAfterInsert > sizeInitial)
@@ -79,7 +76,7 @@ class StorageManagerDriver
         var checkReq = new DataRetrieval("Students", new[] { "*" }, new Condition { lhs="StudentID", opr=Condition.Operation.EQ, rhs="100" });
         bool found = false;
         foreach(var r in storage.ReadBlock(checkReq)) found = true;
-        
+
         if(found) Console.WriteLine("SUCCESS: Data Student 100 terbaca kembali.\n");
         else Console.WriteLine("ERROR: Data Student 100 HILANG (Gagal tulis).\n");
 
@@ -88,7 +85,7 @@ class StorageManagerDriver
         // TEST F: DELETE
         // ==========================================
         Console.WriteLine("--- TEST F: Menghapus Data (DeleteBlock) ---");
-        
+
         // Hapus ID 100 yang baru kita buat
         var delReq = new DataDeletion("Students", new Condition { lhs="StudentID", opr=Condition.Operation.EQ, rhs="100" });
         int deleted = storage.DeleteBlock(delReq);

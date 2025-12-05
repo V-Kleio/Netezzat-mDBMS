@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-
 namespace mDBMS.Common.Data
 {
     // Buffer Key
@@ -61,11 +58,11 @@ namespace mDBMS.Common.Data
             if (_frames.ContainsKey(key))
             {
                 _frames[key] = page;
-                
+
                 // Update posisi LRU
                 _evictionQueue.Remove(key);
                 _evictionQueue.Add(key);
-                
+
                 return null;
             }
 

@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using mDBMS.Common.Data;
 
 namespace mDBMS.StorageManager
@@ -29,13 +26,13 @@ namespace mDBMS.StorageManager
 
             // Absolute path di folder bin/debug
             string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "students.dat");
-            
-            SchemaSerializer.WriteSchema(filePath, schema); 
+
+            SchemaSerializer.WriteSchema(filePath, schema);
 
             List<byte[]> rows = new();
             for (int i = 1; i <= 50; i++)
             {
-                var row = new Row(); 
+                var row = new Row();
                 row["StudentID"] = i;
                 row["FullName"] = $"Student {i}";
                 rows.Add(RowSerializer.SerializeRow(schema, row));
@@ -105,7 +102,7 @@ namespace mDBMS.StorageManager
         {
             // Append Only karena Header sudah dibuat
             List<byte[]> currentBlock = new();
-            int currentSize = 4; 
+            int currentSize = 4;
 
             foreach (var rowBytes in rows)
             {

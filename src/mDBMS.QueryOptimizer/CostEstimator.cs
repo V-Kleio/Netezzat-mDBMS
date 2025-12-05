@@ -1,8 +1,6 @@
 using mDBMS.Common.Interfaces;
 using mDBMS.Common.Data;
-using mDBMS.Common.QueryData;
 using System.Text.RegularExpressions;
-using System.ComponentModel.DataAnnotations.Schema;
 
 namespace mDBMS.QueryOptimizer
 {
@@ -58,7 +56,7 @@ namespace mDBMS.QueryOptimizer
         }
 
         /// <summary>
-        /// Estimate cost untuk index seek (selective search) | 
+        /// Estimate cost untuk index seek (selective search) |
         /// Selectivity default = 10%
         /// </summary>
         private double EstimateIndexSeekCost(Statistic stats, double selectivity = 0.1) {
