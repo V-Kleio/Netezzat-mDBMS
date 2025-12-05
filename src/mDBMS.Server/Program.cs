@@ -64,7 +64,7 @@ class Server
                         {
                             byte[] buffer = new byte[initialBufferSize];
                             int length = 0;
-                            
+
                             Stopwatch stopwatch = new();
                             stopwatch.Start();
 
@@ -83,13 +83,13 @@ class Server
 
                                 stopwatch.Start();
                             }
-        
-                            var (query, transactionId) = queryDecoder.Decode(buffer, 0, length);
+
+                            var (query, transactionId) = QueryDecoder.Decode(buffer, 0, length);
                             Console.WriteLine($"Received query: {query} with transaction ID: {transactionId}");
-        
+
                             ExecutionResult result = qp.ExecuteQuery(query, transactionId);
-                            byte[] response = resultEncoder.Encode(result);
-        
+                            byte[] response = ExecutionResultEncoder.Encode(result);
+
                             stream.Write(response, 0, response.Length);
                         }
                     }

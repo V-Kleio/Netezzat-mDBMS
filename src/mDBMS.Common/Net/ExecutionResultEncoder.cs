@@ -6,7 +6,7 @@ namespace mDBMS.Common.Net
 {
     public class ExecutionResultEncoder
     {
-        public byte[] Encode(ExecutionResult result)
+        public static byte[] Encode(ExecutionResult result)
         {
             var payload = new ExecutionResultPayload(result);
             string data = JsonSerializer.Serialize(payload);

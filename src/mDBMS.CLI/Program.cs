@@ -1,6 +1,6 @@
 using System.Net;
 using mDBMS.Common.Transaction;
-using nDBMS.CLI;
+using mDBMS.CLI;
 
 class CLI
 {
@@ -52,18 +52,18 @@ class CLI
         {
             Console.Write("mDBMS > ");
             var input = Console.ReadLine();
-        
+
             if (input is null)
             {
                 break;
             }
-        
+
             if (string.Equals(input.Trim(), "EXIT", StringComparison.OrdinalIgnoreCase))
             {
                 Console.WriteLine("Sampai jumpa!");
                 break;
             }
-        
+
             var result = proxy.ExecuteQuery(input, -1);
             PrintResult(result);
         }
@@ -73,7 +73,7 @@ class CLI
     {
         var status = result.Success ? "SUCCESS" : "ERROR";
         Console.WriteLine($"[{status}] {result.Message}");
-    
+
         if (result.Data != null)
         {
             Console.WriteLine("\nHasil:");

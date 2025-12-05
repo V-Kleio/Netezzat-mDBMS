@@ -4,24 +4,14 @@ using mDBMS.Common.Transaction;
 
 namespace mDBMS.Common.Net;
 
-class ExecutionResultPayload
+class ExecutionResultPayload(ExecutionResult result)
 {
-    public int TransactionId;
-    public string Query;
-    public bool Success;
-    public string Message;
-    public DateTime ExecutedAt;
-    [JsonInclude] private IEnumerable<EncodedRow>? data;
-
-    public ExecutionResultPayload(ExecutionResult result)
-    {
-        this.TransactionId = result.TransactionId;
-        this.Query = result.Query;
-        this.Success = result.Success;
-        this.Message = result.Message;
-        this.ExecutedAt = result.ExecutedAt;
-        this.data = result.Data?.Select(row => new EncodedRow(row));
-    }
+    public int TransactionId = result.TransactionId;
+    public string Query = result.Query;
+    public bool Success = result.Success;
+    public string Message = result.Message;
+    public DateTime ExecutedAt = result.ExecutedAt;
+    [JsonInclude] private readonly IEnumerable<EncodedRow>? data = result.Data?.Select(row => new EncodedRow(row));
 
     public ExecutionResult Extract()
     {
