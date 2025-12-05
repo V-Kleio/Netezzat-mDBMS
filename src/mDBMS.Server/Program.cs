@@ -41,65 +41,123 @@ class Server
         var frm = new FailureRecoveryManager(qpProxy, sm);
         var qp = new QueryProcessor(sm, qo, ccm, frm);
 
-        var queryDecoder = new QueryDecoder();
-        var resultEncoder = new ExecutionResultEncoder();
-
-        ((LateProxy<IQueryProcessor>) qpProxy).SetTarget(qp);
+        ((LateProxy<IQueryProcessor>)qpProxy).SetTarget(qp);
 
         IPEndPoint endpoint = new(IPAddress.Loopback, port);
 
-        using (TcpListener listener = new(endpoint))
+        using TcpListener listener = new(endpoint);
+        listener.Start();
+
+        Console.CancelKeyPress += (sender, e) =>
         {
-            listener.Start();
-            Console.WriteLine($"Server listening on {endpoint}");
+            e.Cancel = true;
+            Console.WriteLine("\nShutting down server...");
+            listener.Stop();
+            Environment.Exit(0);
+        };
+        Console.WriteLine($"Server listening on {endpoint}. Press Ctrl+C to stop.");
 
-            while (true)
+        while (true)
+        {
+            TcpClient? handler = null;
+            NetworkStream? stream = null;
+
+            try
             {
-                try
+                handler = listener.AcceptTcpClient();
+                handler.ReceiveTimeout = connectionTimeout;
+                stream = handler.GetStream();
+
+                byte[] buffer = new byte[initialBufferSize];
+                int length = 0;
+
+                Stopwatch stopwatch = new();
+                stopwatch.Start();
+
+                length += stream.Read(buffer, 0, buffer.Length);
+                while (length == buffer.Length)
                 {
-                    using (TcpClient handler = listener.AcceptTcpClient())
+                    stopwatch.Stop();
+
+                    Array.Resize(ref buffer, buffer.Length * 2);
+                    length += stream.Read(buffer, length, buffer.Length - length);
+
+                    if (stopwatch.ElapsedMilliseconds >= connectionTimeout)
                     {
-                        handler.ReceiveTimeout = connectionTimeout;
-                        using (NetworkStream stream = handler.GetStream())
+                        break;
+                    }
+
+                    stopwatch.Start();
+                }
+
+                if (length == 0)
+                {
+                    Console.WriteLine("Client disconnected without sending data");
+                    continue;
+                }
+
+                var (query, transactionId) = QueryDecoder.Decode(buffer, 0, length);
+
+                if (string.IsNullOrWhiteSpace(query))
+                {
+                    ExecutionResult emptyResult = new()
+                    {
+                        Query = query,
+                        Success = false,
+                        Message = "Empty query"
+                    };
+                    byte[] emptyResponse = ExecutionResultEncoder.Encode(emptyResult);
+                    stream.Write(emptyResponse, 0, emptyResponse.Length);
+                    continue;
+                }
+
+                Console.WriteLine($"Received query: {query} with transaction ID: {transactionId}");
+
+                ExecutionResult result = qp.ExecuteQuery(query, transactionId);
+                byte[] response = ExecutionResultEncoder.Encode(result);
+
+                stream.Write(response, 0, response.Length);
+            }
+            catch (SocketException e)
+            {
+                Console.WriteLine($"Socket error: {e.Message}");
+            }
+            catch (IOException e)
+            {
+                Console.WriteLine($"IO error: {e.Message}");
+            }
+            catch (ArgumentException e)
+            {
+                Console.WriteLine($"Argument error: {e.Message}");
+
+                if (stream != null)
+                {
+                    try
+                    {
+                        ExecutionResult errorResult = new()
                         {
-                            byte[] buffer = new byte[initialBufferSize];
-                            int length = 0;
-
-                            Stopwatch stopwatch = new();
-                            stopwatch.Start();
-
-                            length += stream.Read(buffer, 0, buffer.Length);
-                            while (length == buffer.Length)
-                            {
-                                stopwatch.Stop();
-
-                                Array.Resize(ref buffer, buffer.Length * 2);
-                                length += stream.Read(buffer, length, buffer.Length - length);
-
-                                if (stopwatch.ElapsedMilliseconds >= connectionTimeout)
-                                {
-                                    break;
-                                }
-
-                                stopwatch.Start();
-                            }
-
-                            var (query, transactionId) = QueryDecoder.Decode(buffer, 0, length);
-                            Console.WriteLine($"Received query: {query} with transaction ID: {transactionId}");
-
-                            ExecutionResult result = qp.ExecuteQuery(query, transactionId);
-                            byte[] response = ExecutionResultEncoder.Encode(result);
-
-                            stream.Write(response, 0, response.Length);
-                        }
+                            Query = "",
+                            Success = false,
+                            Message = $"Server error: {e.Message}"
+                        };
+                        byte[] errorResponse = ExecutionResultEncoder.Encode(errorResult);
+                        stream.Write(errorResponse, 0, errorResponse.Length);
+                    }
+                    catch
+                    {
+                        // Stream might be broken, ignore
                     }
                 }
-                catch (ArgumentException)
-                {
-                    // Send error back to client if I dont't forget
-                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Unexpected error: {e.Message}");
+            }
+            finally
+            {
+                stream?.Dispose();
+                handler?.Dispose();
             }
         }
     }
 }
-
