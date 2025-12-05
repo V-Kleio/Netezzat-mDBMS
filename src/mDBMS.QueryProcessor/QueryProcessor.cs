@@ -31,7 +31,7 @@ namespace mDBMS.QueryProcessor
             _handlers = new Dictionary<QueryClassification, IQueryHandler>
             {
                 { QueryClassification.Dml, new DMLHandler(_storageManager, _queryOptimizer, _concurrencyControlManager, _failureRecoveryManager) },
-                { QueryClassification.TransactionBegin, new BeginTransactionHandler(_concurrencyControlManager) },
+                { QueryClassification.TransactionBegin, new BeginTransactionHandler(_concurrencyControlManager, _failureRecoveryManager) },
                 { QueryClassification.TransactionCommit, new CommitTransactionHandler(_concurrencyControlManager, _failureRecoveryManager) },
                 { QueryClassification.TransactionAbort, new AbortTransactionHandler(_concurrencyControlManager, _failureRecoveryManager) }
             };
@@ -41,12 +41,12 @@ namespace mDBMS.QueryProcessor
         {
             if (string.IsNullOrWhiteSpace(query))
             {
-                return LogAndReturn(new ExecutionResult()
+                return new ExecutionResult()
                 {
                     Query = string.Empty,
                     Success = false,
                     Message = "Query tidak boleh kosong."
-                });
+                };
             }
 
             var normalizedQuery = query.Trim();
@@ -56,31 +56,25 @@ namespace mDBMS.QueryProcessor
                 
                 if (_handlers.TryGetValue(classification, out var handler))
                 {
-                    return LogAndReturn(handler.HandleQuery(normalizedQuery, transactionId));
+                    return handler.HandleQuery(normalizedQuery, transactionId);
                 }
 
-                return LogAndReturn(new ExecutionResult()
+                return new ExecutionResult()
                 {
                     Query = normalizedQuery,
                     Success = false,
                     Message = "Tipe query tidak dikenali atau belum didukung."
-                });
+                };
             }
             catch (Exception ex)
             {
-                return LogAndReturn(new ExecutionResult()
+                return new ExecutionResult()
                 {
                     Query = normalizedQuery,
                     Success = false,
                     Message = $"Terjadi kesalahan saat mengeksekusi query: {ex.Message}"
-                });
+                };
             }
-        }
-
-        private ExecutionResult LogAndReturn(ExecutionResult result)
-        {
-            _failureRecoveryManager.WriteLog(result);
-            return result;
         }
 
         private static QueryClassification Classify(string query)

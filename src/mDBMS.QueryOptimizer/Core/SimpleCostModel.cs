@@ -50,6 +50,16 @@ public class SimpleCostModel : ICostModel
     /// </summary>
     private const double WRITE_COST_FACTOR = 2.0;
 
+    /// <summary>
+    /// Cost untuk memeriksa constraint per row (foreign key, unique, check).
+    /// </summary>
+    private const double CONSTRAINT_CHECK_COST_PER_ROW = 0.05;
+
+    /// <summary>
+    /// Cost untuk cascade operation (delete/update foreign key relations).
+    /// </summary>
+    private const double CASCADE_COST_MULTIPLIER = 1.5;
+
     // === Implementation ICostModel ===
 
     /// <summary>
@@ -210,6 +220,86 @@ public class SimpleCostModel : ICostModel
         double cpuCost = affectedRows * CPU_COST_PER_ROW;
         double indexMaintenanceCost = affectedRows * indexCount * HASH_BUILD_COST_PER_ROW;
         return ioCost + cpuCost + indexMaintenanceCost;
+    }
+    /// <summary>
+    /// Estimasi cost untuk operasi INSERT.
+    /// Write I/O cost untuk data blocks.
+    /// CPU cost untuk processing rows.
+    /// Index maintenance cost (insert ke semua index).
+    /// Constraint checking cost (PK, FK, UNIQUE, CHECK).
+    /// </summary>
+    public double EstimateInsert(double rowCount, int columnCount, int indexCount = 0, bool hasConstraints = false)
+    {
+        if (rowCount <= 0) return 0;
+
+        // I/O Cost: Write data ke disk. Asumsi: 1 block bisa hold multiple rows, tapi setiap write perlu flush
+        double blockingFactor = Math.Max(1, 100.0 / columnCount); // estimate rows per block
+        double blocksToWrite = Math.Ceiling(rowCount / blockingFactor);
+        double ioCost = blocksToWrite * IO_COST_PER_BLOCK * WRITE_COST_FACTOR;
+
+        // CPU Cost: Process setiap row (validation, serialization)
+        double cpuCost = rowCount * CPU_COST_PER_ROW;
+
+        // Index Maintenance Cost: Insert ke semua index. Setiap index insert adalah tree traversal + write
+        double indexCost = 0;
+        if (indexCount > 0)
+        {
+            // Tree traversal per row per index
+            double traversalPerRow = SafeLog2(Math.Max(rowCount, 1)) * INDEX_SEEK_BASE_COST;
+            indexCost = rowCount * indexCount * (traversalPerRow + HASH_BUILD_COST_PER_ROW);
+        }
+
+        // Constraint Checking Cost
+        double constraintCost = 0;
+        if (hasConstraints)
+        {
+            // Check PK/FK/UNIQUE/CHECK per row
+            constraintCost = rowCount * CONSTRAINT_CHECK_COST_PER_ROW;
+        }
+
+        // Batch Optimization: Reduce cost untuk bulk insert
+        double batchFactor = rowCount > 100 ? 0.8 : 1.0; // 20% discount untuk bulk
+
+        return (ioCost + cpuCost + indexCost + constraintCost) * batchFactor;
+    }
+    /// <summary>
+    /// Estimasi cost untuk operasi DELETE.
+    /// Locate rows cost (scan atau seek).
+    /// Delete I/O cost (mark deleted + reclaim space).
+    /// Index maintenance cost (remove dari semua index).
+    /// Cascade cost (jika ada FK cascade delete).
+    /// </summary>
+    public double EstimateDelete(double affectedRows, double blockingFactor, int indexCount = 0, bool hasCascade = false)
+    {
+        if (affectedRows <= 0) return 0;
+
+        blockingFactor = Math.Max(blockingFactor, 1.0);
+
+        // I/O Cost: Write untuk mark deleted + update metadata
+        double blocksAffected = Math.Ceiling(affectedRows / blockingFactor);
+        double ioCost = blocksAffected * IO_COST_PER_BLOCK * WRITE_COST_FACTOR;
+
+        // CPU Cost: Process deletion per row
+        double cpuCost = affectedRows * CPU_COST_PER_ROW;
+
+        // Index Maintentance Cost: Delete entry dari semua index
+        double indexCost = 0;
+        if (indexCount > 0)
+        {
+            double traversalPerRow = SafeLog2(Math.Max(affectedRows, 1)) * INDEX_SEEK_BASE_COST;
+            // Removal lebih murah dari insert (70% cost)
+            indexCost = affectedRows * indexCount * traversalPerRow * 0.7;
+        }
+
+        // Cascade Cost: Delete related rows di foreign key tables
+        double cascadeCost = 0;
+        if (hasCascade)
+        {
+            // Asumsi: cascade ke rata-rata 2 related tables dengan 3x rows
+            cascadeCost = affectedRows * 3 * CPU_COST_PER_ROW * CASCADE_COST_MULTIPLIER;
+        }
+
+        return ioCost + cpuCost + indexCost + cascadeCost;
     }
     /// <summary>
     /// Estimasi selectivity untuk condition.

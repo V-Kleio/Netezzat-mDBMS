@@ -38,6 +38,8 @@ internal sealed class SqlParser
         {
             SqlTokenType.SELECT => ParseSelect(),
             SqlTokenType.UPDATE => ParseUpdate(),
+            SqlTokenType.INSERT => ParseInsert(),
+            SqlTokenType.DELETE => ParseDelete(),
             _ => throw new InvalidOperationException($"Unsupported query type: {first.Type}")
         };
     }
@@ -103,6 +105,83 @@ internal sealed class SqlParser
         {
             throw new InvalidOperationException($"Unexpected token after end of UPDATE: {Peek().Lexeme}");
         }
+        return q;
+    }
+    /// <summary>
+    /// Parse INSERT INTO ... VALUES ...
+    /// Parse INSERT INTO ... SELECT ... FROM ...
+    /// </summary>
+    public Query ParseInsert()
+    {
+        var q = new Query { Type = QueryType.INSERT };
+
+        Expect(SqlTokenType.INSERT);
+        Expect(SqlTokenType.INTO);
+        q.Table = ParseIdentifier();
+
+        // Optional: explicit column list
+        if (Match(SqlTokenType.OPEN_PAREN))
+        {
+            // Check if this is column list or VALUES
+            // Heuristic: jika setelah '(' ada identifier diikuti ',' atau ')', ini column list
+            if (Peek().Type == SqlTokenType.IDENTIFIER && !IsValueLiteral(Peek(1)))
+            {
+                q.InsertColumns = ParseColumnList();
+                Expect(SqlTokenType.CLOSE_PAREN);
+            }
+            else
+            {
+                // Ini adalah VALUES tanpa explicit columns
+                // Backtrack: kembalikan '(' untuk parsing VALUES
+                _pos--;
+            }
+        }
+
+        // VALUES atau SELECT
+        if (Match(SqlTokenType.VALUES))
+        {
+            q.InsertValues = ParseValuesList();
+        }
+        else if (Peek().Type == SqlTokenType.SELECT)
+        {
+            q.InsertFromQuery = ParseSelect();
+        }
+        else
+        {
+            throw new InvalidOperationException("Expected VALUES or SELECT after INSERT INTO table");
+        }
+
+        // Validate EOF
+        if (Peek().Type != SqlTokenType.EOF)
+        {
+            throw new InvalidOperationException($"Unexpected token after INSERT: {Peek().Lexeme}");
+        }
+
+        return q;
+    }
+    /// <summary>
+    /// PARSE DELETE FROM ... [WHERE ...]
+    /// </summary>
+    public Query ParseDelete()
+    {
+        var q = new Query { Type = QueryType.DELETE };
+
+        Expect(SqlTokenType.DELETE);
+        Expect(SqlTokenType.FROM);
+        q.Table = ParseIdentifier();
+
+        // Optional WHERE clause
+        if (Match(SqlTokenType.WHERE))
+        {
+            q.WhereClause = ReadUntilKeywords(SqlTokenType.EOF).Trim();
+        }
+
+        // Validate EOF
+        if (Peek().Type != SqlTokenType.EOF)
+        {
+            throw new InvalidOperationException($"Unexpected token after DELETE: {Peek().Lexeme}");
+        }
+
         return q;
     }
     /// <summary>
@@ -286,6 +365,135 @@ internal sealed class SqlParser
         } while (Match(SqlTokenType.COMMA));
 
         return orderList;
+    }
+
+    private List<string> ParseColumnList()
+    {
+        var cols = new List<string>();
+        
+        do
+        {
+            cols.Add(ParseIdentifier());
+        } while (Match(SqlTokenType.COMMA));
+
+        return cols;
+    }
+
+    private List<List<string>> ParseValuesList()
+    {
+        var allRows = new List<List<string>>();
+
+        do
+        {
+            Expect(SqlTokenType.OPEN_PAREN);
+            var oneRow = ParseSingleValueRow();
+            Expect(SqlTokenType.CLOSE_PAREN);
+            allRows.Add(oneRow);
+
+        } while (Match(SqlTokenType.COMMA));
+
+        // Validate all rows have same column count
+        if (allRows.Count > 1)
+        {
+            int expectedCount = allRows[0].Count;
+            for (int i = 1; i < allRows.Count; i++)
+            {
+                if (allRows[i].Count != expectedCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Row {i + 1} has {allRows[i].Count} values, expected {expectedCount}");
+                }
+            }
+        }
+
+        return allRows;
+    }
+
+    private List<string> ParseSingleValueRow()
+    {
+        var values = new List<string>();
+
+        do
+        {
+            values.Add(ParseValue());
+        } while (Match(SqlTokenType.COMMA));
+
+        return values;
+    }
+
+    private string ParseValue()
+    {
+        var token = Peek();
+
+        // 1. DEFAULT keyword
+        if (Match(SqlTokenType.DEFAULT))
+        {
+            return "DEFAULT";
+        }
+
+        // 2. String literal
+        if (token.Type == SqlTokenType.STRING)
+        {
+            return "'" + Consume().Lexeme + "'";
+        }
+
+        // 3. Number literal
+        if (token.Type == SqlTokenType.NUMBER)
+        {
+            return Consume().Lexeme;
+        }
+
+        // 4. NULL or identifier (function call, column reference)
+        if (token.Type == SqlTokenType.IDENTIFIER)
+        {
+            var ident = Consume().Lexeme;
+
+            // Check for function call: FUNC(...)
+            if (Match(SqlTokenType.OPEN_PAREN))
+            {
+                var args = ParseFunctionArgs();
+                Expect(SqlTokenType.CLOSE_PAREN);
+                return $"{ident}({string.Join(", ", args)})";
+            }
+
+            return ident;
+        }
+
+        // 5. Nested expression with parentheses
+        if (Match(SqlTokenType.OPEN_PAREN))
+        {
+            var expr = ParseValue();
+            Expect(SqlTokenType.CLOSE_PAREN);
+            return $"({expr})";
+        }
+
+        throw new InvalidOperationException($"Unexpected token in VALUES: {token.Type} '{token.Lexeme}'");
+    }
+
+    private List<string> ParseFunctionArgs()
+    {
+        var args = new List<string>();
+
+        // Empty function: FUNC()
+        if (Peek().Type == SqlTokenType.CLOSE_PAREN)
+        {
+            return args;
+        }
+
+        do
+        {
+            args.Add(ParseValue());
+        } while (Match(SqlTokenType.COMMA));
+
+        return args;
+    }
+
+    private bool IsValueLiteral(SqlToken token)
+    {
+        return token.Type == SqlTokenType.STRING 
+            || token.Type == SqlTokenType.NUMBER 
+            || token.Type == SqlTokenType.DEFAULT
+            || token.Lexeme.Equals("NULL", StringComparison.OrdinalIgnoreCase);
     }
 }
 

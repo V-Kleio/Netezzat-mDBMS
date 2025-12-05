@@ -23,22 +23,26 @@ namespace mDBMS.QueryProcessor.Transaction
                     Query = query,
                     Success = false,
                     Message = "Tidak ada transaksi aktif yang bisa di-COMMIT.",
-                    TransactionId = null
+                    TransactionId = -1
                 };
             }
 
             // 1. Panggil CCM untuk me-release lock dan ganti status
             _concurrencyControlManager.EndTransaction(transactionId, true);
-
-            // Kita berasumsi WriteLog untuk COMMIT sudah dipanggil di QueryProcessor.cs.
+            _failureRecoveryManager.WriteLog(new()
+            {
+                Operation = ExecutionLog.OperationType.COMMIT,
+                TransactionId = transactionId,
+                TableName = "",
+                RowIdentifier = "",
+            });
 
             return new ExecutionResult()
             {
                 Query = query,
                 Success = true,
                 Message = $"Transaksi {transactionId} berhasil di-COMMIT.",
-                TransactionId = transactionId,
-                TableName = "COMMIT" 
+                TransactionId = transactionId
             };
         }
     }

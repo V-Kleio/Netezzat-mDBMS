@@ -8,12 +8,14 @@ namespace mDBMS.Common.Data
         public byte[] Data { get; set; } = new byte[4096];
         public bool IsDirty { get; set; } = false; 
 
-        public Page(string tableName, int blockID)
+        public Page(string tableName, int blockID, byte[] data, bool isDirty)
         {
             TableName = tableName;
             BlockID = blockID;
-            Data = new byte[4096];
-            IsDirty = false;
+            Data = data;
+            IsDirty = isDirty;
         }
+
     }
 }
+
