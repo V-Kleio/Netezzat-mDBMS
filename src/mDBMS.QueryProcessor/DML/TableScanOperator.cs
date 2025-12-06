@@ -18,8 +18,6 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
                 canonRow[$"{node.TableName}." + key] = val;
             }
 
-            Console.Write($"[INFO] Retrieved row with id: {row.id}");
-
             yield return canonRow;
         }
     }

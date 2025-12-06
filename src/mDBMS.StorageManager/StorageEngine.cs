@@ -5,7 +5,7 @@ namespace mDBMS.StorageManager
 {
     public class StorageEngine : IStorageManager
     {
-        private static readonly string DataPath = AppDomain.CurrentDomain.BaseDirectory;
+        private static readonly string DataPath = Path.Combine(Directory.GetCurrentDirectory(), "data");
         private const int BlockSize = 4096;
         private const int FileHeaderSize = 4096;
 
@@ -14,6 +14,7 @@ namespace mDBMS.StorageManager
 
         public StorageEngine(IBufferManager? bufferManager = null)
         {
+            Console.WriteLine($"DataPath set at: {DataPath}");
             _bufferManager = bufferManager;
         }
 
@@ -48,7 +49,10 @@ namespace mDBMS.StorageManager
             string fileName = $"{tableName.ToLower()}.dat";
             string fullPath = Path.Combine(DataPath, fileName);
 
-            if (!File.Exists(fullPath)) return 0;
+            if (!File.Exists(fullPath))
+            {
+                throw new Exception("tabel tidak ditemukan");
+            }
 
             TableSchema? schema = GetSchemaFromFile(fileName);
             if (schema == null) return 0;
@@ -147,7 +151,11 @@ namespace mDBMS.StorageManager
             string fileName = $"{tableName.ToLower()}.dat";
             string fullPath = Path.Combine(DataPath, fileName);
 
-            if (!File.Exists(fullPath)) return 0;
+            if (!File.Exists(fullPath))
+            {
+                throw new Exception("tabel tidak ditemukan");
+            }
+
             TableSchema? schema = GetSchemaFromFile(fileName);
             if (schema == null) return 0;
 
@@ -252,7 +260,10 @@ namespace mDBMS.StorageManager
             string fileName = $"{tableName.ToLower()}.dat";
             string fullPath = Path.Combine(DataPath, fileName);
 
-            if (!File.Exists(fullPath)) yield break;
+            if (!File.Exists(fullPath))
+            {
+                throw new Exception("tabel tidak ditemukan");
+            }
 
             TableSchema? schema = GetSchemaFromFile(fileName);
             if (schema == null) yield break;
@@ -313,7 +324,10 @@ namespace mDBMS.StorageManager
             string fileName = $"{tableName.ToLower()}.dat";
             string fullPath = Path.Combine(DataPath, fileName);
 
-            if (!File.Exists(fullPath)) return 0;
+            if (!File.Exists(fullPath))
+            {
+                throw new Exception("tabel tidak ditemukan");
+            }
 
             TableSchema? schema = GetSchemaFromFile(fileName);
             if (schema == null) return 0;
