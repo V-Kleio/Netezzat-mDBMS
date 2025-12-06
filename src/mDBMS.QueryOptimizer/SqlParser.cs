@@ -124,27 +124,70 @@ internal sealed class SqlParser
         {
             // Check if this is column list or VALUES
             // Heuristic: jika setelah '(' ada identifier diikuti ',' atau ')', ini column list
-            if (Peek().Type == SqlTokenType.IDENTIFIER && !IsValueLiteral(Peek(1)))
+            int savedPos = _pos;
+
+            try
             {
-                q.InsertColumns = ParseColumnList();
-                Expect(SqlTokenType.CLOSE_PAREN);
+                var columns = ParseColumnList();
+
+                if (Match(SqlTokenType.CLOSE_PAREN))
+                {
+                    q.InsertColumns = columns;
+                }
+                else
+                {
+                    _pos = savedPos - 1;
+                }
             }
-            else
+            catch
             {
-                // Ini adalah VALUES tanpa explicit columns
-                // Backtrack: kembalikan '(' untuk parsing VALUES
-                _pos--;
+                _pos = savedPos - 1;
             }
+            // if (Peek().Type == SqlTokenType.IDENTIFIER && !IsValueLiteral(Peek(1)))
+            // {
+            //     q.InsertColumns = ParseColumnList();
+            //     Expect(SqlTokenType.CLOSE_PAREN);
+            // }
+            // else
+            // {
+            //     // Ini adalah VALUES tanpa explicit columns
+            //     // Backtrack: kembalikan '(' untuk parsing VALUES
+            //     _pos--;
+            // }
         }
 
         // VALUES atau SELECT
         if (Match(SqlTokenType.VALUES))
         {
             q.InsertValues = ParseValuesList();
+
+            if (q.InsertColumns != null && q.InsertValues != null && q.InsertValues.Count > 0)
+            {
+                int expectedCount = q.InsertColumns.Count;
+                int actualCount = q.InsertValues[0].Count;
+
+                if (expectedCount != actualCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Column count mismatch: {expectedCount} columns specified, but {actualCount} values provided");
+                }
+            }
         }
         else if (Peek().Type == SqlTokenType.SELECT)
         {
             q.InsertFromQuery = ParseSelect();
+
+            if (q.InsertColumns != null && q.InsertFromQuery != null)
+            {
+                int expectedCount = q.InsertColumns.Count;
+                int actualCount = q.InsertFromQuery.SelectedColumns.Count;
+
+                if (!q.InsertFromQuery.SelectedColumns.Contains("*") && expectedCount != actualCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Column count mismatch: {expectedCount} columns specified, but SELECT returns {actualCount} columns");
+                }
+            }
         }
         else
         {
@@ -212,8 +255,10 @@ internal sealed class SqlParser
         var sb = new StringBuilder();
         int depth = 0;
         bool hasToken = false;
+        int maxIterations = 1000000;
+        int iterations = 0;
 
-        while (true) {
+        while (iterations++ < maxIterations) {
             var t = Peek();
             if (t.Type == SqlTokenType.EOF || (depth == 0 && (t.Type == SqlTokenType.COMMA || t.Type == SqlTokenType.WHERE)))
             {
@@ -224,7 +269,7 @@ internal sealed class SqlParser
                 throw new InvalidOperationException("Unexpected '=' inside SET expression");
             }
             if (t.Type == SqlTokenType.OPEN_PAREN) depth++;
-            if (t.Type == SqlTokenType.CLOSE_PAREN)   
+            if (t.Type == SqlTokenType.CLOSE_PAREN)
             {
                 depth--;
                 if (depth < 0)
@@ -236,17 +281,21 @@ internal sealed class SqlParser
             sb.Append(Consume().Lexeme + " ");
         }
 
+        if (iterations >= maxIterations)
+        {
+            throw new InvalidOperationException("Expression too complex or infinite loop detected in SET clause");
+        }
         if (!hasToken)
-            {
-                throw new InvalidOperationException("Empty value in SET assignment");
-            }
+        {
+            throw new InvalidOperationException("Empty value in SET assignment");
+        }
         if (depth != 0)
-            {
-                throw new InvalidOperationException("Unbalanced parentheses in SET expression");
-            }
-    return sb.ToString().Trim();
+        {
+            throw new InvalidOperationException("Unbalanced parentheses in SET expression");
+        }
+        return sb.ToString().Trim();
     }
-    
+
     private void Expect(SqlTokenType type)
     {
         var t = Consume();
@@ -341,7 +390,7 @@ internal sealed class SqlParser
     private List<OrderByOperation> ParseOrderByList()
     {
         var orderList = new List<OrderByOperation>();
-        
+
         do
         {
             var col = ParseIdentifierWithOptionalDot();
@@ -370,7 +419,7 @@ internal sealed class SqlParser
     private List<string> ParseColumnList()
     {
         var cols = new List<string>();
-        
+
         do
         {
             cols.Add(ParseIdentifier());
@@ -387,6 +436,10 @@ internal sealed class SqlParser
         {
             Expect(SqlTokenType.OPEN_PAREN);
             var oneRow = ParseSingleValueRow();
+            if (oneRow.Count == 0)
+            {
+                throw new InvalidOperationException("VALUES list cannot be empty");
+            }
             Expect(SqlTokenType.CLOSE_PAREN);
             allRows.Add(oneRow);
 
@@ -448,6 +501,11 @@ internal sealed class SqlParser
         {
             var ident = Consume().Lexeme;
 
+            if (ident.Equals("NULL", StringComparison.OrdinalIgnoreCase))
+            {
+                return "NULL";
+            }
+
             // Check for function call: FUNC(...)
             if (Match(SqlTokenType.OPEN_PAREN))
             {
@@ -490,8 +548,8 @@ internal sealed class SqlParser
 
     private bool IsValueLiteral(SqlToken token)
     {
-        return token.Type == SqlTokenType.STRING 
-            || token.Type == SqlTokenType.NUMBER 
+        return token.Type == SqlTokenType.STRING
+            || token.Type == SqlTokenType.NUMBER
             || token.Type == SqlTokenType.DEFAULT
             || token.Lexeme.Equals("NULL", StringComparison.OrdinalIgnoreCase);
     }

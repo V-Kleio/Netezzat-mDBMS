@@ -5,24 +5,17 @@ using mDBMS.Common.Transaction;
 
 namespace mDBMS.QueryProcessor.DML
 {
-    internal class DMLHandler : IQueryHandler
+    internal class DMLHandler(
+        IStorageManager storageManager,
+        IQueryOptimizer queryOptimizer,
+        IConcurrencyControlManager concurrencyControlManager,
+        IFailureRecoveryManager failureRecoveryManager
+        ) : IQueryHandler
     {
-        private readonly IStorageManager _storageManager;
-        private readonly IQueryOptimizer _queryOptimizer;
-        private readonly IConcurrencyControlManager _concurrencyControlManager;
-        private readonly IFailureRecoveryManager _failureRecoveryManager;
-
-        public DMLHandler(
-            IStorageManager storageManager,
-            IQueryOptimizer queryOptimizer,
-            IConcurrencyControlManager concurrencyControlManager,
-            IFailureRecoveryManager failureRecoveryManager
-        ) {
-            _storageManager = storageManager;
-            _queryOptimizer = queryOptimizer;
-            _concurrencyControlManager = concurrencyControlManager;
-            _failureRecoveryManager = failureRecoveryManager;
-        }
+        private readonly IStorageManager _storageManager = storageManager;
+        private readonly IQueryOptimizer _queryOptimizer = queryOptimizer;
+        private readonly IConcurrencyControlManager _concurrencyControlManager = concurrencyControlManager;
+        private readonly IFailureRecoveryManager _failureRecoveryManager = failureRecoveryManager;
 
         public ExecutionResult HandleQuery(string query, int transactionId)
         {
@@ -67,14 +60,14 @@ namespace mDBMS.QueryProcessor.DML
             return result;
         }
 
-        private ExecutionResult HandleSelect(string query, int transactionId)
+        private ExecutionResult ExecutePlan(string query, int transactionId, string successMessage, bool returnData = false)
         {
             Query parsedQuery = _queryOptimizer.ParseQuery(query);
 
             // Dapatkan Query Plan dari Optimizer
             QueryPlan queryPlan = _queryOptimizer.OptimizeQuery(parsedQuery);
             List<Row>? resultData;
-            
+
             try
             {
                 if (queryPlan.PlanTree is null)
@@ -90,24 +83,27 @@ namespace mDBMS.QueryProcessor.DML
                 )).ToList();
 
                 // Validasi Read ke CCM
-                foreach (Row row in resultData)
+                if (returnData)
                 {
-                    string[] ids = row.id.Split(';');
-
-                    foreach (string id in ids)
+                    foreach (Row row in resultData)
                     {
-                        var action = new Common.Transaction.Action(
-                            Common.Transaction.Action.ActionType.Read,
-                            DatabaseObject.CreateRow(id, parsedQuery.Table),
-                            transactionId,
-                            query
-                        );
-            
-                        var response = _concurrencyControlManager.ValidateObject(action);
-            
-                        if (!response.Allowed)
+                        string[] ids = row.id.Split(';');
+
+                        foreach (string id in ids)
                         {
-                            throw new Exception($"Read operation ditolak oleh CCM: {response.Reason}");
+                            var action = new Common.Transaction.Action(
+                                Common.Transaction.Action.ActionType.Read,
+                                DatabaseObject.CreateRow(id, parsedQuery.Table),
+                                transactionId,
+                                query
+                            );
+
+                            var response = _concurrencyControlManager.ValidateObject(action);
+
+                            if (!response.Allowed)
+                            {
+                                throw new Exception($"Read operation ditolak oleh CCM: {response.Reason}");
+                            }
                         }
                     }
                 }
@@ -117,66 +113,6 @@ namespace mDBMS.QueryProcessor.DML
                 if (transactionId != -1)
                 {
                     _concurrencyControlManager.AbortTransaction(transactionId);
-
-                    _failureRecoveryManager.WriteLog(new()
-                    {
-                        Operation = ExecutionLog.OperationType.COMMIT,
-                        TransactionId = transactionId,
-                        TableName = "",
-                        RowIdentifier = "",
-                    });
-
-                    _failureRecoveryManager.UndoTransaction(transactionId);
-                }
-
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = false,
-                    Message = e.Message,
-                    Data = null,
-                    TransactionId = -1,
-                };
-            }
-
-            return new ExecutionResult()
-            {
-                Query = query,
-                Success = true,
-                Message = "Query berhasil dieksekusi.",
-                Data = resultData,
-                TransactionId = transactionId
-            };
-        }
-        
-        private ExecutionResult HandleInsert(string query, int transactionId)
-        {
-            Query parsedQuery = _queryOptimizer.ParseQuery(query);
-
-            // Dapatkan Query Plan dari Optimizer
-            QueryPlan queryPlan = _queryOptimizer.OptimizeQuery(parsedQuery);
-            List<Row>? resultData;
-            
-            try
-            {
-                if (queryPlan.PlanTree is null)
-                {
-                    throw new Exception("Could not retrieve query plan");
-                }
-
-                resultData = queryPlan.PlanTree.AcceptVisitor(new Operator(
-                    _storageManager,
-                    _failureRecoveryManager,
-                    _concurrencyControlManager,
-                    transactionId
-                )).ToList();
-            }
-            catch (Exception e)
-            {
-                if (transactionId != -1)
-                {
-                    _concurrencyControlManager.AbortTransaction(transactionId);
-
                     _failureRecoveryManager.WriteLog(new()
                     {
                         Operation = ExecutionLog.OperationType.ABORT,
@@ -202,130 +138,23 @@ namespace mDBMS.QueryProcessor.DML
             {
                 Query = query,
                 Success = true,
-                Message = "Row baru telah dimuatkan.",
-                Data = null,
+                Message = successMessage,
+                Data = returnData ? resultData : null,
                 TransactionId = transactionId
             };
         }
+
+        private ExecutionResult HandleSelect(string query, int transactionId)
+            => ExecutePlan(query, transactionId, "Query berhasil dieksekusi.", returnData: true);
+
+        private ExecutionResult HandleInsert(string query, int transactionId)
+            => ExecutePlan(query, transactionId, "Row baru telah dimuatkan.");
 
         private ExecutionResult HandleUpdate(string query, int transactionId)
-        {
-            Query parsedQuery = _queryOptimizer.ParseQuery(query);
-
-            // Dapatkan Query Plan dari Optimizer
-            QueryPlan queryPlan = _queryOptimizer.OptimizeQuery(parsedQuery);
-            List<Row>? resultData;
-            
-            try
-            {
-                if (queryPlan.PlanTree is null)
-                {
-                    throw new Exception("Could not retrieve query plan");
-                }
-
-                resultData = queryPlan.PlanTree.AcceptVisitor(new Operator(
-                    _storageManager,
-                    _failureRecoveryManager,
-                    _concurrencyControlManager,
-                    transactionId
-                )).ToList();
-            }
-            catch (Exception e)
-            {
-                if (transactionId != -1)
-                {
-                    _concurrencyControlManager.AbortTransaction(transactionId);
-
-                    _failureRecoveryManager.WriteLog(new()
-                    {
-                        Operation = ExecutionLog.OperationType.ABORT,
-                        TransactionId = transactionId,
-                        TableName = "",
-                        RowIdentifier = "",
-                    });
-
-                    _failureRecoveryManager.UndoTransaction(transactionId);
-                }
-
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = false,
-                    Message = e.Message,
-                    Data = null,
-                    TransactionId = -1,
-                };
-            }
-
-            return new ExecutionResult()
-            {
-                Query = query,
-                Success = true,
-                Message = "Row telah diperbarui.",
-                Data = null,
-                TransactionId = transactionId
-            };
-        }
+            => ExecutePlan(query, transactionId, "Row telah diperbarui.");
 
         private ExecutionResult HandleDelete(string query, int transactionId)
-        {
-            Query parsedQuery = _queryOptimizer.ParseQuery(query);
-
-            // Dapatkan Query Plan dari Optimizer
-            QueryPlan queryPlan = _queryOptimizer.OptimizeQuery(parsedQuery);
-            List<Row>? resultData;
-            
-            try
-            {
-                if (queryPlan.PlanTree is null)
-                {
-                    throw new Exception("Could not retrieve query plan");
-                }
-
-                resultData = queryPlan.PlanTree.AcceptVisitor(new Operator(
-                    _storageManager,
-                    _failureRecoveryManager,
-                    _concurrencyControlManager,
-                    transactionId
-                )).ToList();
-            }
-            catch (Exception e)
-            {
-                if (transactionId != -1)
-                {
-                    _concurrencyControlManager.AbortTransaction(transactionId);
-
-                    _failureRecoveryManager.WriteLog(new()
-                    {
-                        Operation = ExecutionLog.OperationType.ABORT,
-                        TransactionId = transactionId,
-                        TableName = "",
-                        RowIdentifier = "",
-                    });
-
-                    _failureRecoveryManager.UndoTransaction(transactionId);
-                }
-
-                return new ExecutionResult()
-                {
-                    Query = query,
-                    Success = false,
-                    Message = e.Message,
-                    Data = null,
-                    TransactionId = -1,
-                };
-            }
-
-            return new ExecutionResult()
-            {
-                Query = query,
-                Success = true,
-
-                Message = "Row telah dihapus.",
-                Data = null,
-                TransactionId = transactionId
-            };
-        }
+            => ExecutePlan(query, transactionId, "Row telah dihapus.");
 
         private ExecutionResult HandleUnrecognized(string query, int transactionId)
         {

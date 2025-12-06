@@ -36,10 +36,10 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 
                 bool valid = condition.opr switch
                 {
-                    Condition.Operation.EQ => lhs == rhs,
+                    Condition.Operation.EQ => Equals(lhs, rhs),
+                    Condition.Operation.NEQ => !Equals(lhs, rhs),
                     Condition.Operation.GT => ((IComparable) lhs).CompareTo(rhs) > 0,
                     Condition.Operation.LT => ((IComparable) lhs).CompareTo(rhs) < 0,
-                    Condition.Operation.NEQ => lhs != rhs,
                     Condition.Operation.GEQ => ((IComparable) lhs).CompareTo(rhs) >= 0,
                     Condition.Operation.LEQ => ((IComparable) lhs).CompareTo(rhs) <= 0,
                     _ => throw new Exception("unknown condition operator")

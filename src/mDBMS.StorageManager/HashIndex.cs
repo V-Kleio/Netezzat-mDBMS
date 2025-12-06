@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace mDBMS.StorageManager
 {
     public class HashIndex
@@ -7,7 +5,7 @@ namespace mDBMS.StorageManager
         // Key: Value Kolom (misal: 101, "Budi")
         // Value: List of BlockOffsets (misal: [4096, 8192])
         private readonly Dictionary<object, List<long>> _index = new();
-        
+
         public string TableName { get; }
         public string ColumnName { get; }
 
@@ -25,7 +23,7 @@ namespace mDBMS.StorageManager
             {
                 _index[key] = new List<long>();
             }
-            
+
             // Hindari duplikat offset (meskipun jarang terjadi di append-only)
             if (!_index[key].Contains(blockOffset))
             {

@@ -3,5 +3,5 @@ namespace mDBMS.QueryProcessor;
 
 internal interface IQueryHandler
 {
-    public ExecutionResult HandleQuery(string query, int trnansactionId);
+    public ExecutionResult HandleQuery(string query, int transactionId);
 }

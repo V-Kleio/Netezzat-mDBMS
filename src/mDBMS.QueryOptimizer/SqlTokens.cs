@@ -130,20 +130,27 @@ internal sealed class SqlLexer
 
     private SqlToken ReadString()
     {
-        // Asumsi: karakter current adalah backslash
+        // Current character is the opening quote (')
         int start = ++_pos;
+
         while (!IsEof())
         {
-            if (_src[_pos] == '\'' )
+            if (_src[_pos] == '\'')
             {
+                if (_pos + 1 < _src.Length && _src[_pos + 1] == '\'')
+                {
+                    _pos += 2;
+                    continue;
+                }
+
                 var literal = _src[start.._pos];
                 _pos++;
                 return new SqlToken(SqlTokenType.STRING, literal);
             }
             _pos++;
         }
-        // String yang tidak terminated, ambil sampai akhir
-        return new SqlToken(SqlTokenType.STRING, _src[start..]);
+
+        throw new InvalidOperationException($"Unterminated string literal starting at position {start - 1}");
     }
 
     private SqlToken ReadNumber()

@@ -9,14 +9,14 @@ namespace mDBMS.QueryOptimizer;
 /// <summary>
 /// Builder untuk konstruksi plan tree dari Query object.
 /// Menggunakan heuristic rules untuk membangun tree yang efisien.
-/// 
+///
 /// Heuristic rules yang diterapkan:
 /// 1. Push selection (filter) sedekat mungkin ke base table
 /// 2. Push projection sedekat mungkin ke base table
 /// 3. Pilih join order berdasarkan selectivity
 /// 4. Pilih join algorithm berdasarkan size dan index availability
 /// 5. Lakukan sort di akhir jika memungkinkan
-/// 
+///
 /// Principle: Single Responsibility - hanya build tree, tidak calculate cost
 /// </summary>
 public class PlanBuilder
@@ -235,13 +235,20 @@ public class PlanBuilder
 
     private static Statistic CreateDefaultStats(string tableName)
     {
+        const int BLOCK_SIZE = 4096;
+        const int TUPLE_SIZE = 100;
+        const int TUPLE_COUNT = 1000;
+
+        int blockingFactor = BLOCK_SIZE / TUPLE_SIZE;
+        int blockCount = (TUPLE_COUNT + blockingFactor - 1) / blockingFactor;
+
         return new Statistic
         {
             Table = tableName,
-            TupleCount = 1000,
-            BlockCount = 100,
-            TupleSize = 100,
-            BlockingFactor = 10,
+            TupleCount = TUPLE_COUNT,
+            BlockCount = blockCount,
+            TupleSize = TUPLE_SIZE,
+            BlockingFactor = blockingFactor,
             DistinctValues = 100,
             Indices = Array.Empty<(string, IndexType)>()
 
@@ -430,7 +437,7 @@ public class PlanBuilder
                 default:
                     break;
             }
-        }   
+        }
         catch
         {
             node.EstimatedRows = Math.Max(1, node.EstimatedRows == 0 ? 100 : node.EstimatedRows);
@@ -472,7 +479,7 @@ public class PlanBuilder
     {
         // Try to match patterns like: column = value, column > value, etc.
         var operators = new[] { ">=", "<=", "<>", "!=", "=", ">", "<" };
-        
+
         foreach (var op in operators)
         {
             var idx = expr.IndexOf(op, StringComparison.OrdinalIgnoreCase);
@@ -480,7 +487,7 @@ public class PlanBuilder
             {
                 var lhs = expr.Substring(0, idx).Trim();
                 var rhs = expr.Substring(idx + op.Length).Trim();
-                
+
                 var operation = op switch
                 {
                     "=" => Condition.Operation.EQ,
