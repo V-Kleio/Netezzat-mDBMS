@@ -48,10 +48,7 @@ class ProcessorProxy(IPEndPoint endpoint) : IQueryProcessor
 
             result = ExecutionResultDecoder.Decode(buffer, 0, length);
 
-            if (result.TransactionId > 0)
-            {
-                transactionId = result.TransactionId;
-            }
+            transactionId = result.TransactionId;
         }
         catch (SocketException e)
         {
