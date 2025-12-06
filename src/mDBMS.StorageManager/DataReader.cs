@@ -1,6 +1,3 @@
-using System;
-using System.IO;
-using System.Collections.Generic;
 using mDBMS.Common.Data;
 
 namespace mDBMS.StorageManager
@@ -8,7 +5,7 @@ namespace mDBMS.StorageManager
     public static class DataReader
     {
         private const int BlockSize = 4096;
-        private const int FileHeaderSize = 4096; 
+        private const int FileHeaderSize = 4096;
 
         public static void ReadFile(string tableName)
         {
@@ -54,11 +51,11 @@ namespace mDBMS.StorageManager
                     if (bytesRead < BlockSize) Array.Clear(buffer, bytesRead, BlockSize - bytesRead);
 
                     Console.WriteLine($"\n--- Blok Data {blockIndex} ---");
-                    try 
+                    try
                     {
                         List<Row> rows = BlockSerializer.DeserializeBlock(schema, buffer);
                         if (rows.Count == 0) Console.WriteLine("(Blok Kosong)");
-                        
+
                         int i = 0;
                         foreach (var row in rows)
                         {

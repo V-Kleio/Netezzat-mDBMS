@@ -4,26 +4,17 @@ using mDBMS.Common.Interfaces;
 using mDBMS.Common.Net;
 using mDBMS.Common.Transaction;
 
-namespace nDBMS.CLI;
+namespace mDBMS.CLI;
 
-class ProcessorProxy : IQueryProcessor
+class ProcessorProxy(IPEndPoint endpoint) : IQueryProcessor
 {
-    private IPEndPoint endpoint;
-    private int transactionId;
-    private QueryEncoder encoder;
-    private ExecutionResultDecoder decoder;
+    private readonly IPEndPoint endpoint = endpoint;
+    private int transactionId = -1;
 
-    public ProcessorProxy(IPEndPoint endpoint)
+    public ExecutionResult ExecuteQuery(string query, int txId)
     {
-        this.endpoint = endpoint;
-        this.transactionId = -1;
-        this.encoder = new();
-        this.decoder = new();
-    }
-
-    public ExecutionResult ExecuteQuery(string query, int _)
-    {
-        byte[] message = encoder.Encode(query, transactionId);
+        int effectiveTxId = txId >= 0 ? txId : transactionId;
+        byte[] message = QueryEncoder.Encode(query, effectiveTxId);
         ExecutionResult? result;
 
         byte[] buffer = new byte[128];
@@ -31,23 +22,54 @@ class ProcessorProxy : IQueryProcessor
 
         try
         {
-            using (TcpClient client = new(endpoint.Address.ToString(), endpoint.Port))
+            using TcpClient client = new(endpoint.Address.ToString(), endpoint.Port);
+            using (NetworkStream stream = client.GetStream())
             {
-                using (NetworkStream stream = client.GetStream())
+                stream.Write(message);
+                stream.Socket.Shutdown(SocketShutdown.Send);
+
+                length += stream.Read(buffer, length, buffer.Length - length);
+                if (length == 0)
                 {
-                    stream.Write(message);
-                    stream.Socket.Shutdown(SocketShutdown.Send);
-        
-                    length += stream.Read(buffer, length, buffer.Length - length);
-                    while (length == buffer.Length)
+                    return new()
                     {
-                        Array.Resize(ref buffer, buffer.Length * 2);
-                        length += stream.Read(buffer, length, buffer.Length - length);
-                    }
+                        Query = query,
+                        Success = false,
+                        Message = "Server closed connection without response"
+                    };
                 }
-                
-                result = decoder.Decode(buffer, 0, length);                
+
+                while (length == buffer.Length)
+                {
+                    Array.Resize(ref buffer, buffer.Length * 2);
+                    length += stream.Read(buffer, length, buffer.Length - length);
+                }
             }
+
+            result = ExecutionResultDecoder.Decode(buffer, 0, length);
+
+            if (result.TransactionId > 0)
+            {
+                transactionId = result.TransactionId;
+            }
+        }
+        catch (SocketException e)
+        {
+            result = new()
+            {
+                Query = query,
+                Success = false,
+                Message = $"Connection error: {e.Message}. Is the server running?"
+            };
+        }
+        catch (IOException e)
+        {
+            result = new()
+            {
+                Query = query,
+                Success = false,
+                Message = $"Network error: {e.Message}"
+            };
         }
         catch (ArgumentException e)
         {
@@ -56,6 +78,15 @@ class ProcessorProxy : IQueryProcessor
                 Query = query,
                 Success = false,
                 Message = e.Message
+            };
+        }
+        catch (Exception e)
+        {
+            result = new()
+            {
+                Query = query,
+                Success = false,
+                Message = $"Unexpected error: {e.Message}"
             };
         }
 

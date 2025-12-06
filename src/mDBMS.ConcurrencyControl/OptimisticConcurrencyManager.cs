@@ -191,8 +191,25 @@ public class OptimisticConcurrencyManager : IConcurrencyControlManager
             // Clean up old committed transactions (keep last 100)
             if (_committedTransactions.Count > 100)
             {
-                var oldestTxn = _committedTransactions.OrderBy(kvp => kvp.Value.FinishTimestamp).FirstOrDefault();
-                _committedTransactions.TryRemove(oldestTxn.Key, out _);
+                // var oldestTxn = _committedTransactions.OrderBy(kvp => kvp.Value.FinishTimestamp).FirstOrDefault();
+                // _committedTransactions.TryRemove(oldestTxn.Key, out _);
+                long minActiveStartTS = _transactions.Values
+                    .Where(t => t.Status == TransactionStatus.Active)
+                    .Select(t => t.StartTimestamp)
+                    .DefaultIfEmpty(long.MaxValue)
+                    .Min();
+
+                var safeToRemove = _committedTransactions.Values
+                    .Where(t => t.FinishTimestamp < minActiveStartTS)
+                    .OrderBy(t => t.FinishTimestamp)
+                    .Take(_committedTransactions.Count - 100)
+                    .Select(t => t.TransactionId)
+                    .ToList();
+
+                foreach (var txnId in safeToRemove)
+                {
+                    _committedTransactions.TryRemove(txnId, out _);
+                }
             }
         }
         else

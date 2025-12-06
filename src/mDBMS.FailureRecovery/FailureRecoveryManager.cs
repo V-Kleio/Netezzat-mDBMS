@@ -1,6 +1,5 @@
 ﻿using mDBMS.Common.Transaction;
 using mDBMS.Common.Interfaces;
-using System.Text;
 using mDBMS.Common.Data;
 
 
@@ -150,6 +149,12 @@ namespace mDBMS.FailureRecovery
         // Gunanya buat rollback transaksi yang gagal/dibatalin based on ID transaksi yang mau di-undo
         public bool UndoTransaction(int transactionId)
         {
+            if (transactionId <= 0)
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Invalid transaction ID: {transactionId}");
+                return false;
+            }
+
             Console.WriteLine($"[FRM UNDO]: Memulai undo untuk Transaction T{transactionId}");
 
             if (_queryProcessor == null)
@@ -234,16 +239,30 @@ namespace mDBMS.FailureRecovery
         /// </summary>
         public void FlushLogBuffer()
         {
+            List<LogEntry> entriesToFlush;
+
             lock (_logLock)
             {
                 if (_logBuffer.Count == 0) return;
 
-                foreach (var entry in _logBuffer)
-                {
-                    File.AppendAllText(_logFilePath, entry.Serialize() + "\n");
-                }
-
+                entriesToFlush = [.. _logBuffer];
                 _logBuffer.Clear();
+            }
+
+            try
+            {
+                var lines = entriesToFlush.Select(e => e.Serialize());
+                File.AppendAllLines(_logFilePath, lines);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Failed to flush log buffer - {ex.Message}");
+
+                lock (_logLock)
+                {
+                    _logBuffer.InsertRange(0, entriesToFlush);
+                }
+                throw;
             }
         }
         /// <summary>
@@ -550,16 +569,22 @@ namespace mDBMS.FailureRecovery
         // Undo INSERT = DELETE by RowIdentifier
         private string GenerateUndoForInsert(LogEntry entry)
         {
-                if (string.IsNullOrEmpty(entry.TableName) || string.IsNullOrEmpty(entry.RowIdentifier))
-                {
-                    Console.Error.WriteLine($"[ERROR FRM]: Missing TableName or RowIdentifier untuk undo INSERT");
-                    return string.Empty;
-                }
-
-                // Assuming RowIdentifier contains primary key information
-                // Format: DELETE FROM table WHERE primary_key = value
-                return $"DELETE FROM {entry.TableName} WHERE {entry.RowIdentifier}";
+            if (string.IsNullOrEmpty(entry.TableName) || string.IsNullOrEmpty(entry.RowIdentifier))
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Missing TableName or RowIdentifier untuk undo INSERT");
+                return string.Empty;
             }
+
+            if (!entry.RowIdentifier.Contains('=') && !entry.RowIdentifier.Contains("IN"))
+            {
+                Console.Error.WriteLine($"[ERROR FRM]: Invalid RowIdentifier for UNDO INSERT: '{entry.RowIdentifier}'");
+                return string.Empty;
+            }
+
+            // Assuming RowIdentifier contains primary key information
+            // Format: DELETE FROM table WHERE primary_key = value
+            return $"DELETE FROM {entry.TableName} WHERE {entry.RowIdentifier}";
+        }
 
             /// Undo UPDATE = Restore BeforeImage
         private string GenerateUndoForUpdate(LogEntry entry)
@@ -732,7 +757,7 @@ namespace mDBMS.FailureRecovery
         private string EscapeSqlString(string value)
         {
             if (string.IsNullOrEmpty(value))
-                return string.Empty;
+                return "NULL";
 
             return value.Replace("'", "''");
         }

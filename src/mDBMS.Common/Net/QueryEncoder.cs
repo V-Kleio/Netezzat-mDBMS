@@ -5,7 +5,7 @@ namespace mDBMS.Common.Net
 {
     public class QueryEncoder
     {
-        public byte[] Encode(string query, int transactionId)
+        public static byte[] Encode(string query, int transactionId)
         {
             var payload = new QueryPayload(transactionId, query);
             string data = JsonSerializer.Serialize(payload);

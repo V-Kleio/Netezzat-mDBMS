@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using mDBMS.Common.Data;
 
 namespace mDBMS.StorageManager
@@ -33,6 +30,11 @@ namespace mDBMS.StorageManager
             {
                 byte[] rowBytes = rows[i];
                 int rowLength = rowBytes.Length;
+
+                if (dataPtr + rowLength >= directoryPtr - 2)
+                {
+                    throw new InvalidOperationException($"Block overflow: Cannot fit {recordCount} rows in {BlockSize} bytes");
+                }
 
                 // Tulis Data
                 Buffer.BlockCopy(rowBytes, 0, block, dataPtr, rowLength);

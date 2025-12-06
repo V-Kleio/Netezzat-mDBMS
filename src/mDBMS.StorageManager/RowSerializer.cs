@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
 using System.Text;
-using System.IO; 
 using mDBMS.Common.Data;
 
 namespace mDBMS.StorageManager
@@ -14,7 +11,7 @@ namespace mDBMS.StorageManager
             using (var ms = new MemoryStream())
             using (var writer = new BinaryWriter(ms))
             {
-                string rowId = row.id ?? Guid.NewGuid().ToString(); 
+                string rowId = row.id ?? Guid.NewGuid().ToString();
                 writer.Write(rowId);
 
                 foreach (var col in schema.Columns)
@@ -36,8 +33,12 @@ namespace mDBMS.StorageManager
 
                         case DataType.String:
                             string strVal = value as string ?? string.Empty;
-                            if (strVal.Length > col.Length) strVal = strVal.Substring(0, col.Length);
-                            
+                            if (strVal.Length > col.Length)
+                            {
+                                Console.WriteLine($"[WARNING] String truncated for column '{col.Name}': '{strVal}' -> '{strVal[..col.Length]}'");
+                                strVal = strVal[..col.Length];
+                            }
+
                             byte[] strBytes = new byte[col.Length];
                             Encoding.ASCII.GetBytes(strVal).CopyTo(strBytes, 0);
                             writer.Write(strBytes);
@@ -56,7 +57,7 @@ namespace mDBMS.StorageManager
             {
                 var row = new Row();
 
-                try 
+                try
                 {
                     row.id = reader.ReadString();
                 }

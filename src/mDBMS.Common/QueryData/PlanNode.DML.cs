@@ -1,5 +1,3 @@
-using mDBMS.Common.Data;
-
 namespace mDBMS.Common.QueryData;
 
 /// <summary>

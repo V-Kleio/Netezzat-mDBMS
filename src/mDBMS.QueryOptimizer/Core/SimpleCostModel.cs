@@ -1,23 +1,22 @@
 using mDBMS.Common.Data;
-using mDBMS.QueryOptimizer.Core;
 
 namespace mDBMS.QueryOptimizer.Core;
 
 /// <summary>
 /// Implementasi cost model berbasis I/O dan CPU cost.
 /// Menggunakan konstanta yang dapat di-tune berdasarkan karakteristik hardware.
-/// 
+///
 /// Formula dasar:
 /// - Total Cost = I/O Cost + CPU Cost
 /// - I/O Cost = Jumlah Block yang dibaca × Cost per Block
 /// - CPU Cost = Jumlah Row yang diproses × Cost per Row
-/// 
+///
 /// Principle: Single Responsibility - hanya menghitung cost, tidak membuat plan
 /// </summary>
 public class SimpleCostModel : ICostModel
 {
     // === Konstanta Cost (dapat dituning berdasarkan hardware) ===
-    
+
     /// <summary>
     /// Cost untuk memproses satu row (CPU operation).
     /// Mencakup: parsing, evaluation, memory allocation.
@@ -215,7 +214,7 @@ public class SimpleCostModel : ICostModel
     /// Estimasi cost untuk operasi UPDATE.
     /// </summary>
     public double EstimateUpdate(double affectedRows, double blockingFactor, int indexCount = 0) {
-        double estimatedBlocks = Math.Ceiling(affectedRows / Math.Max(blockingFactor, 1)); 
+        double estimatedBlocks = Math.Ceiling(affectedRows / Math.Max(blockingFactor, 1));
         double ioCost = estimatedBlocks * IO_COST_PER_BLOCK * WRITE_COST_FACTOR;
         double cpuCost = affectedRows * CPU_COST_PER_ROW;
         double indexMaintenanceCost = affectedRows * indexCount * HASH_BUILD_COST_PER_ROW;
@@ -304,7 +303,7 @@ public class SimpleCostModel : ICostModel
     /// <summary>
     /// Estimasi selectivity untuk condition.
     /// Menentukan berapa persen rows yang akan lolos filter.
-    /// 
+    ///
     /// Heuristic rules:
     /// - No condition: 100% (semua row lolos)
     /// - Equality (=): 1 / distinct_values

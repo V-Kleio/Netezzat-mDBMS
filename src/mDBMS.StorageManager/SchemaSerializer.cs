@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Text;
 
 namespace mDBMS.StorageManager
@@ -36,7 +33,7 @@ namespace mDBMS.StorageManager
             {
                 // 1. Magic Number (4 bytes)
                 writer.Write(Encoding.ASCII.GetBytes(MagicNumber));
-                
+
                 // 2. Version (4 bytes)
                 writer.Write(Version);
 
@@ -84,7 +81,7 @@ namespace mDBMS.StorageManager
                     if (magic != MagicNumber) throw new Exception("Invalid file format (Magic Number mismatch).");
 
                     reader.ReadInt32(); // Skip Version
-                    
+
                     // 2. Table Name (32 bytes)
                     string tableName = ReadFixedString(reader, 32);
 

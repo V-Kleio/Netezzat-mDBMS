@@ -2,14 +2,8 @@ using System.Text.Json.Serialization;
 
 namespace mDBMS.Common.Net;
 
-class QueryPayload
+class QueryPayload(int transactionId, string query)
 {
-    [JsonInclude] public int TransactionId;
-    [JsonInclude] public string Query = "";
-
-    public QueryPayload(int transactionId, string query)
-    {
-        this.TransactionId = transactionId;
-        this.Query = query;
-    }
+    [JsonInclude] public int TransactionId = transactionId;
+    [JsonInclude] public string Query = query;
 }

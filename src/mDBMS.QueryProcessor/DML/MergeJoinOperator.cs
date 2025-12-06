@@ -11,124 +11,133 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
         string ljoin = (string) node.JoinCondition.lhs;
         string rjoin = (string) node.JoinCondition.rhs;
 
-        Dictionary<string, Type> leftKeys = [];
-        Dictionary<string, Type> rightKeys = [];
+        Dictionary<string, Type>? leftKeys = null;
+        Dictionary<string, Type>? rightKeys = null;
 
         SortNode leftsort = new(node.Left, [new() { Column = ljoin }]);
         SortNode rightsort = new(node.Right, [new() { Column = rjoin }]);
 
-        IEnumerable<Row> lhs = leftsort.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId));
-        IEnumerable<Row> rhs = rightsort.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId));
+        List<Row> leftRows = leftsort.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId)).ToList();
+        List<Row> rightRows = rightsort.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId)).ToList();
 
-        IEnumerator<Row> litr = lhs.GetEnumerator();
-        IEnumerator<Row> ritr = rhs.GetEnumerator();
+        bool[] leftMatched = new bool[leftRows.Count];
+        bool[] rightMatched = new bool[rightRows.Count];
 
-        object? currentMatcher = null;
-        List<Row> leftMatchers = [];
-        List<Row> rightMatchers = [];
-
-        while (litr.MoveNext() && ritr.MoveNext())
+        if (leftRows.Count > 0)
         {
-            Row leftRow = litr.Current;
-            Row rightRow = ritr.Current;
+            leftKeys = leftRows[0].Columns.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.GetType());
+        }
+        if (rightRows.Count > 0)
+        {
+            rightKeys = rightRows[0].Columns.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.GetType());
+        }
 
-            if (leftKeys.Count == 0)
-            {
-                foreach (var (key, val) in leftRow.Columns)
-                {
-                    leftKeys[key] = val.GetType();
-                }
-            }
+        int leftIdx = 0;
+        int rightIdx = 0;
 
-            if (rightKeys.Count == 0)
-            {
-                foreach (var (key, val) in rightRow.Columns)
-                {
-                    rightKeys[key] = val.GetType();
-                }
-            }
+        while (leftIdx < leftRows.Count && rightIdx < rightRows.Count)
+        {
+            Row leftRow = leftRows[leftIdx];
+            Row rightRow = rightRows[rightIdx];
 
-            if (leftRow[ljoin] == currentMatcher)
+            var leftVal = (IComparable) leftRow[ljoin];
+            var rightVal = rightRow[rjoin];
+
+            int cmp = leftVal.CompareTo(rightVal);
+
+            if (cmp < 0)
             {
-                litr.MoveNext();
+                leftIdx++;
             }
-            else if (rightRow[rjoin] == currentMatcher)
+            else if (cmp > 0)
             {
-                ritr.MoveNext();
+                rightIdx++;
             }
             else
             {
-                int order = ((IComparable) leftRow.Columns[ljoin]).CompareTo(rightRow.Columns[rjoin]);
-                bool popLeft = order < 0;
+                int leftStart = leftIdx;
+                int rightStart = rightIdx;
 
-                if (rightMatchers.Count == 0)
+                while (leftIdx < leftRows.Count && Equals(leftRows[leftIdx][ljoin], leftVal))
                 {
-                    foreach (Row rightMatch in rightMatchers)
+                    leftIdx++;
+                }
+
+                while (rightIdx < rightRows.Count && Equals(rightRows[rightIdx][rjoin], rightVal))
+                {
+                    rightIdx++;
+                }
+
+                for (int l = leftStart; l < leftIdx; l++)
+                {
+                    for (int r = rightStart; r < rightIdx; r++)
                     {
+                        leftMatched[l] = true;
+                        rightMatched[r] = true;
+
                         Row row = new();
-                    
-                        foreach (var (key, val) in rightMatch.Columns)
+
+                        foreach (var (key, val) in leftRows[l].Columns)
                         {
                             row[key] = val;
                         }
-        
-                        foreach (var (key, val) in leftKeys)
-                        {
-                            row[key] = RuntimeHelpers.GetUninitializedObject(val);
-                        }
-        
-                        row.id = rightMatch.id;
-        
-                        yield return row;
-                    }
-                }
-                else if (leftMatchers.Count == 0)
-                {
-                    foreach (Row leftMatch in leftMatchers)
-                    {
-                        Row row = new();
-                    
-                        foreach (var (key, val) in leftMatch.Columns)
+
+                        foreach (var (key, val) in rightRows[r].Columns)
                         {
                             row[key] = val;
                         }
-        
-                        foreach (var (key, val) in rightKeys)
-                        {
-                            row[key] = RuntimeHelpers.GetUninitializedObject(val);
-                        }
-        
-                        row.id = leftMatch.id;
-        
+
+                        row.id = leftRows[l].id + ";" + rightRows[r].id;
+
                         yield return row;
                     }
                 }
-                else
-                {
-                    foreach (Row leftMatch in leftMatchers)
-                    {
-                        foreach (Row rightMatch in rightMatchers)
-                        {
-                            Row row = new();
-                        
-                            foreach (var (key, val) in leftMatch.Columns)
-                            {
-                                row[key] = val;
-                            }
-            
-                            foreach (var (key, val) in rightMatch.Columns)
-                            {
-                                row[key] = val;
-                            }
-            
-                            row.id = leftMatch.id + ";" + rightMatch.id;
-            
-                            yield return row;
-                        }
-                    }
-                }
+            }
+        }
 
-                currentMatcher = popLeft ? leftRow[ljoin] : rightRow[rjoin];
+        if (node.JoinType == JoinType.LEFT || node.JoinType == JoinType.FULL)
+        {
+            for (int i = 0; i < leftRows.Count; i++)
+            {
+                if (!leftMatched[i] && rightKeys != null)
+                {
+                    Row row = new() { id = leftRows[i].id };
+
+                    foreach (var (key, val) in leftRows[i].Columns)
+                    {
+                        row[key] = val;
+                    }
+
+                    foreach (var (key, val) in rightKeys)
+                    {
+                        row[key] = RuntimeHelpers.GetUninitializedObject(val);
+                    }
+
+                    yield return row;
+                }
+            }
+        }
+
+        if (node.JoinType == JoinType.RIGHT || node.JoinType == JoinType.FULL)
+        {
+            for (int i = 0; i < rightRows.Count; i++)
+            {
+                if (!rightMatched[i] && leftKeys != null)
+                {
+                    Row row = new() { id = rightRows[i].id };
+
+                    foreach (var (key, val) in leftKeys)
+                    {
+                        row[key] = RuntimeHelpers.GetUninitializedObject(val);
+                    }
+
+                    foreach (var (key, val) in rightRows[i].Columns)
+                    {
+                        row[key] = val;
+                    }
+
+                    yield return row;
+                }
             }
         }
     }
