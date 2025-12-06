@@ -1,6 +1,7 @@
 using System.Net;
 using mDBMS.Common.Transaction;
 using mDBMS.CLI;
+using System.Text;
 
 class CLI
 {
@@ -74,14 +75,55 @@ class CLI
         var status = result.Success ? "SUCCESS" : "ERROR";
         Console.WriteLine($"[{status}] {result.Message}");
 
-        if (result.Data != null)
+        if (result.Data != null && result.Data.Any())
         {
-            Console.WriteLine("\nHasil:");
-            foreach (var row in result.Data)
+            var data = result.Data.ToList();
+            var headers = data.First().Columns.Keys.ToList();
+            var columnWidths = new Dictionary<string, int>();
+
+            foreach (var header in headers)
             {
-                Console.WriteLine(string.Join(" | ", row.Columns.Select(kv => $"{kv.Key}: {kv.Value}")));
+                columnWidths[header] = header.Length;
             }
-            Console.WriteLine();
+
+            foreach (var row in data)
+            {
+                foreach (var header in headers)
+                {
+                    var value = row.Columns[header]?.ToString() ?? "NULL";
+                    if (value.Length > columnWidths[header])
+                    {
+                        columnWidths[header] = value.Length;
+                    }
+                }
+            }
+
+            var headerLine = new StringBuilder("+");
+            var titleLine = new StringBuilder("|");
+
+            foreach (var header in headers)
+            {
+                headerLine.Append(new string('-', columnWidths[header] + 2) + "+");
+                titleLine.Append($" {header.PadRight(columnWidths[header])} |");
+            }
+
+            Console.WriteLine(headerLine);
+            Console.WriteLine(titleLine);
+            Console.WriteLine(headerLine);
+
+            foreach (var row in data)
+            {
+                var rowLine = new StringBuilder("|");
+                foreach (var header in headers)
+                {
+                    var value = row.Columns[header]?.ToString() ?? "NULL";
+                    rowLine.Append($" {value.PadRight(columnWidths[header])} |");
+                }
+                Console.WriteLine(rowLine);
+            }
+            
+            Console.WriteLine(headerLine);
+            Console.WriteLine($"{data.Count} row(s) returned.\n");
         }
     }
 }

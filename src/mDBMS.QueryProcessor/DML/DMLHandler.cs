@@ -114,6 +114,9 @@ namespace mDBMS.QueryProcessor.DML
                 };
             }
 
+            if (returnData)
+                Console.WriteLine($"[INFO] Got {resultData.Count} rows");
+
             return new ExecutionResult()
             {
                 Query = query,

@@ -11,7 +11,7 @@ class ExecutionResultPayload
     [JsonInclude] public bool Success;
     [JsonInclude] public string Message;
     [JsonInclude] public DateTime ExecutedAt;
-    [JsonInclude] private readonly IEnumerable<EncodedRow>? data;
+    [JsonInclude] private IEnumerable<EncodedRow>? data;
 
     public ExecutionResultPayload()
     {
@@ -47,6 +47,12 @@ class ExecutionResultPayload
         [JsonInclude] public string Id;
         [JsonInclude] public Dictionary<string, EncodedDatum> Columns;
 
+        public EncodedRow()
+        {
+            Id = "";
+            Columns = [];
+        }
+
         public EncodedRow(Row row)
         {
             this.Id = row.id;
@@ -75,8 +81,14 @@ class ExecutionResultPayload
 
         public class EncodedDatum
         {
-            [JsonInclude] public string type = typeof(int).ToString();
-            [JsonInclude] public string value = "0";
+            [JsonInclude] public string type;
+            [JsonInclude] public string value;
+
+            public EncodedDatum()
+            {
+                type = typeof(int).ToString();
+                value = "0";
+            }
 
             public EncodedDatum(object? datum)
             {
@@ -106,19 +118,14 @@ class ExecutionResultPayload
                 }
                 else
                 {
-                    Type? datumType = Type.GetType(this.type);
+                    Type? datumType = Type.GetType(type);
 
                     if (datumType is null)
                     {
-                        throw new Exception("could not retrieve type of datum");
+                        throw new Exception("could not retrieve type of data");
                     }
 
-                    if (!datumType.GetInterfaces().Any(t => t.GetGenericTypeDefinition() == typeof(IParsable<>)))
-                    {
-                        throw new Exception("could not cast datum to its original type");
-                    }
-
-                    return datumType.GetMethod("Parse")!.Invoke(null, [this.value]);
+                    return Convert.ChangeType(value, datumType);
                 }
             }
         }
