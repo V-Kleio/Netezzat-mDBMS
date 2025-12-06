@@ -5,12 +5,37 @@ namespace mDBMS.StorageManager
 {
     public class StorageEngine : IStorageManager
     {
-        private static readonly string DataPath = Path.Combine(Directory.GetCurrentDirectory(), "data");
+        private static readonly string DataPath = GetDataPath();
         private const int BlockSize = 4096;
         private const int FileHeaderSize = 4096;
 
         private readonly Dictionary<string, HashIndex> _activeIndexes = new();
         private readonly IBufferManager? _bufferManager;
+        /// <summary>
+        /// Gets the shared data path for all mDBMS projects
+        /// </summary>
+        private static string GetDataPath()
+        {
+            string currentDir = Directory.GetCurrentDirectory();
+            DirectoryInfo? dir = new DirectoryInfo(currentDir);
+
+            while (dir != null)
+            {
+                if (dir.GetFiles("*.sln").Length > 0)
+                {
+                    return Path.Combine(dir.FullName, "data");
+                }
+                dir = dir.Parent;
+            }
+
+            string? customPath = Environment.GetEnvironmentVariable("MDBMS_DATA_PATH");
+            if (!string.IsNullOrEmpty(customPath))
+            {
+                return customPath;
+            }
+
+            return Path.Combine(currentDir, "data");
+        }
 
         public StorageEngine(IBufferManager? bufferManager = null)
         {
