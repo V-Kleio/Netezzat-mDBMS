@@ -33,10 +33,13 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
             int index = 0;
             foreach (var (key, val) in row.Columns)
             {
-                conditions[index].rel = Condition.Relation.COLUMN_AND_VALUE;
-                conditions[index].opr = Condition.Operation.EQ;
-                conditions[index].lhs = key;
-                conditions[index].rhs = val;
+                conditions[index] = new()
+                {
+                    rel = Condition.Relation.COLUMN_AND_VALUE,
+                    opr = Condition.Operation.EQ,
+                    lhs = key,
+                    rhs = val
+                };
 
                 if (key.StartsWith($"{node.TableName}."))
                 {
