@@ -168,7 +168,12 @@ namespace mDBMS.QueryOptimizer
             // Qualify column names di UpdateOperations
             var qualifiedUpdates = query.UpdateOperations.ToDictionary(
                 kvp => kvp.Key.Contains('.') ? kvp.Key : $"{query.Table}.{kvp.Key}",
-                kvp => kvp.Value
+                kvp => {
+                    if (kvp.Value.StartsWith("'") && kvp.Value.EndsWith("'") && kvp.Value != "'")
+                        return kvp.Value.Substring(1, kvp.Value.Length - 2);
+                    else
+                        return kvp.Value;
+                }
             );
 
             // Build UPDATE node

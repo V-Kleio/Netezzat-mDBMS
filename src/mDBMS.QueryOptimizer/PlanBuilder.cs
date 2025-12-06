@@ -672,7 +672,11 @@ public class PlanBuilder
                 {
                     val = real;
                 }
-
+                else if (rhs.StartsWith("'") && rhs.EndsWith("'") && rhs != "'")
+                {
+                    val = rhs.Substring(1, rhs.Length - 2);
+                }
+                
                 return new Condition
                 {
                     lhs = lhs,
