@@ -238,7 +238,7 @@ internal sealed class SqlParser
         if (Peek().Type == SqlTokenType.WHERE || Peek().Type == SqlTokenType.EOF)
             throw new InvalidOperationException("SET clause cannot be empty");
         do {
-            var col = ParseIdentifier();
+            var col = ParseIdentifierWithOptionalDot();
             if (updates.ContainsKey(col))
             {
                 throw new InvalidOperationException($"Duplicate column in SET list: {col}");

@@ -500,10 +500,21 @@ public class PlanBuilder
                     _ => Condition.Operation.EQ
                 };
 
+                object val = rhs;
+
+                if (int.TryParse(rhs, out int integer))
+                {
+                    val = integer;
+                }
+                else if (float.TryParse(rhs, out float real))
+                {
+                    val = real;
+                }
+                
                 return new Condition
                 {
                     lhs = lhs,
-                    rhs = rhs,
+                    rhs = val,
                     opr = operation,
                     rel = Condition.Relation.COLUMN_AND_VALUE
                 };
