@@ -833,36 +833,5 @@ namespace mDBMS.FailureRecovery
             }
             return buffers;
         }
-
-         private LogOperationType ParseOperationType(string operation)
-        {
-            if (string.IsNullOrWhiteSpace(operation))
-            {
-                throw new ArgumentException("Operation type cannot be null or empty", nameof(operation));
-            }
-
-            return operation.ToUpperInvariant() switch
-            {
-                "INSERT" => LogOperationType.INSERT,
-                "UPDATE" => LogOperationType.UPDATE,
-                "DELETE" => LogOperationType.DELETE,
-                "BEGIN" => LogOperationType.BEGIN_TRANSACTION,
-                "COMMIT" => LogOperationType.COMMIT,
-                "ROLLBACK" => LogOperationType.ABORT,
-                "ABORT" => LogOperationType.ABORT,
-
-                // Alias/alternatif
-                "BEGIN TRANSACTION" => LogOperationType.BEGIN_TRANSACTION,
-                "COMMIT TRANSACTION" => LogOperationType.COMMIT,
-                "ROLLBACK TRANSACTION" => LogOperationType.ABORT,
-
-                // Checkpoint
-                "CHECKPOINT" => LogOperationType.CHECKPOINT,
-                "END CHECKPOINT" => LogOperationType.END_CHECKPOINT,
-                "END_CHECKPOINT" => LogOperationType.END_CHECKPOINT,
-
-                _ => throw new ArgumentException($"Unknown operation type: {operation}", nameof(operation))
-            };
-        }
     }
 }
