@@ -86,15 +86,6 @@ class Program
             Console.WriteLine($"\nEstimated Rows: {queryPlan.PlanTree!.EstimatedRows:F0}");
             Console.WriteLine($"Total Cost: {queryPlan.PlanTree.TotalCost:F2}");
 
-            // Step 6: Test flat steps (backward compatibility)
-            Console.WriteLine($"\nBackward Compatibility (Flat Steps):");
-            Console.WriteLine($"  QueryPlan Steps Count: {queryPlan.Steps.Count}");
-            Console.WriteLine($"  QueryPlan Total Cost: {queryPlan.TotalEstimatedCost:F2}");
-            Console.WriteLine($"  Steps:");
-            foreach (var step in queryPlan.Steps)
-            {
-                Console.WriteLine($"    {step.Order}. {step.Operation} - {step.Description}");
-            }
         }
         catch (Exception ex)
         {
