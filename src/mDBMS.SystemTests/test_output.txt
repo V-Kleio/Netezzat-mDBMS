@@ -1,0 +1,407 @@
+╔═══════════════════════════════════════════════════════╗
+║       mDBMS SYSTEM INTEGRATION TESTS                  ║
+╚═══════════════════════════════════════════════════════╝
+
+
+======================================================================
+TEST 1: Concurrent UPDATE with 2PL Deadlock Detection
+======================================================================
+[INFO] Initializing components...
+[2PL] TwoPhaseeLockingManager initialized with Two-Phase Locking Protocol + Deadlock Detection
+[CCM] ConcurrencyControlManager initialized with protocol: TwoPhaseLocking
+[INFO] Starting concurrent transactions...
+
+[2PL] Transaction T2 STARTED (Growing Phase)
+[T1] Transaction started: T2
+[2PL] ValidateObject - T2: Write on Row:accounts.1
+[2PL] GRANTED: T2 acquired Exclusive lock on Row:accounts.1
+[T1] Acquired lock on account 1
+[2PL] Transaction T3 STARTED (Growing Phase)
+[T2] Transaction started: T3
+[2PL] ValidateObject - T3: Write on Row:accounts.2
+[2PL] GRANTED: T3 acquired Exclusive lock on Row:accounts.2
+[T2] Acquired lock on account 2
+[T1] Requesting lock on account 2...
+[2PL] ValidateObject - T2: Write on Row:accounts.2
+[2PL] WAIT: T2 waiting for Exclusive lock on Row:accounts.2
+[2PL]       Held by: T3
+[T1] Waiting for lock on account 2...
+[T2] Requesting lock on account 1 (DEADLOCK EXPECTED)...
+[2PL] ValidateObject - T3: Write on Row:accounts.1
+[2PL] DEADLOCK DETECTED: T3 aborted
+[2PL] EndTransaction - T3 (ABORT)
+[2PL] Transaction T3 -> Failed
+[2PL] Transaction T3 -> Aborted
+[2PL] Released 1 lock(s) for T3
+[2PL] Transaction T3 -> Terminated - All locks released
+[T2] DEADLOCK DETECTED - Transaction will be aborted
+[T2] Reason: Deadlock detected - transaction aborted
+[T2] Transaction ERROR: T2 aborted as deadlock victim
+[T1] Transaction ERROR: T1 was aborted (deadlock victim)
+
+[EVALUATION]
+T1 Success: False, T2 Success: False
+T1 Error: T1 was aborted (deadlock victim)
+T2 Error: T2 aborted as deadlock victim
+
+[FAILED] Expected one commit and one abort due to deadlock
+
+======================================================================
+TEST 2: Crash Recovery After Concurrent Inserts
+======================================================================
+[INFO] Simulating crash recovery scenario...
+[NOTE] This is a simplified simulation
+
+[2PL] TwoPhaseeLockingManager initialized with Two-Phase Locking Protocol + Deadlock Detection
+[CCM] ConcurrencyControlManager initialized with protocol: TwoPhaseLocking
+PHASE 1: Normal Operations
+--------------------------------------------------
+
+[T1] Starting transaction (will COMMIT)
+[2PL] Transaction T2 STARTED (Growing Phase)
+[2PL] ValidateObject - T2: Write on Row:students.1
+[2PL] GRANTED: T2 acquired Exclusive lock on Row:students.1
+[T1] INSERT student id=1 (Alice)
+[2PL] EndTransaction - T2 (COMMIT)
+[2PL] Transaction T2 -> PartiallyCommitted
+[2PL] Transaction T2 -> Committed
+[2PL] Released 1 lock(s) for T2
+[2PL] Transaction T2 -> Terminated - All locks released
+[T1] Transaction COMMITTED: True
+
+[T2] Starting transaction (will be ACTIVE at crash)
+[2PL] Transaction T3 STARTED (Growing Phase)
+[2PL] ValidateObject - T3: Write on Row:students.2
+[2PL] GRANTED: T3 acquired Exclusive lock on Row:students.2
+[T2] INSERT student id=2 (Bob)
+[T2] Transaction remains ACTIVE (no commit)
+
+[T3] Starting transaction (will ABORT)
+[2PL] Transaction T4 STARTED (Growing Phase)
+[2PL] ValidateObject - T4: Write on Row:students.3
+[2PL] GRANTED: T4 acquired Exclusive lock on Row:students.3
+[T3] INSERT student id=3 (Charlie)
+[2PL] EndTransaction - T4 (ABORT)
+[2PL] Transaction T4 -> Failed
+[2PL] Transaction T4 -> Aborted
+[2PL] Released 1 lock(s) for T4
+[2PL] Transaction T4 -> Terminated - All locks released
+[T3] Transaction ABORTED
+
+
+PHASE 2: Simulating System Crash
+--------------------------------------------------
+[CRASH] System crash occurred!
+[CRASH] Buffer pool data lost, only logs survive
+
+
+PHASE 3: Recovery Process
+--------------------------------------------------
+[RECOVERY] Analyzing transaction states...
+[RECOVERY] T1 Status: Terminated (should REDO)
+[RECOVERY] T2 Status: Active (should UNDO)
+[RECOVERY] T3 Status: Terminated (already aborted)
+
+[RECOVERY] Performing recovery operations:
+  ✓ REDO: INSERT student id=1 (Alice) - T1 was committed
+  ✓ UNDO: DELETE student id=2 (Bob) - T2 was active, not committed
+[2PL] EndTransaction - T3 (ABORT)
+[2PL] Transaction T3 -> Failed
+[2PL] Transaction T3 -> Aborted
+[2PL] Released 1 lock(s) for T3
+[2PL] Transaction T3 -> Terminated - All locks released
+  ✓ SKIP: student id=3 (Charlie) - T3 already aborted before crash
+
+[RECOVERY] Recovery complete!
+
+
+VERIFICATION:
+--------------------------------------------------
+Expected final state:
+  ✓ Student id=1 (Alice): EXISTS (T1 was committed, REDOne)
+  ✓ Student id=2 (Bob): NOT EXISTS (T2 was active, UNDOne)
+  ✓ Student id=3 (Charlie): NOT EXISTS (T3 was aborted)
+
+[FAILED] Recovery test simulation failed!
+
+======================================================================
+TEST 3: SELECT Query with Index and Join Optimization
+======================================================================
+[INFO] Simulating query optimization scenario
+[NOTE] This is a conceptual demonstration
+
+QUERY: SELECT s.name, d.name
+       FROM students s
+       JOIN departments d ON s.dept_id = d.id
+       WHERE s.id = 12345;
+
+------------------------------------------------------------
+QUERY OPTIMIZER ANALYSIS
+------------------------------------------------------------
+
+1. Parsing Query...
+   ✓ Identified tables: students, departments
+   ✓ Identified join condition: s.dept_id = d.id
+   ✓ Identified predicate: s.id = 12345 (highly selective)
+
+2. Cost Estimation:
+   Option A: Table Scan on students
+     - Rows to scan: 10,000
+     - Estimated cost: 10,000 * 1.0 = 10,000
+
+   Option B: Index Seek on students.id
+     - Index levels: ~4
+     - Estimated cost: log(10,000) * 1.2 ≈ 16
+
+3. Decision:
+   ✓ SELECTED: Index Seek (cost: 16)
+   ✓ REJECTED: Table Scan (cost: 10,000)
+   ✓ Speedup: ~625x faster
+
+4. Join Strategy:
+   ✓ Nested Loop Join (result set is small: 1 row)
+   ✓ Inner: IndexSeek on students
+   ✓ Outer: IndexSeek on departments
+
+------------------------------------------------------------
+SIMULATED EXECUTION
+------------------------------------------------------------
+[2PL] TwoPhaseeLockingManager initialized with Two-Phase Locking Protocol + Deadlock Detection
+[CCM] ConcurrencyControlManager initialized with protocol: TwoPhaseLocking
+
+1. Begin Transaction
+[2PL] Transaction T2 STARTED (Growing Phase)
+   Transaction ID: 2
+
+2. Execute Index Seek on students.id=12345
+   ✓ Acquired S-lock on students.row.12345
+   ✓ Read time: ~1ms
+   Result: 1 row found
+
+3. Execute Index Seek on departments (based on dept_id)
+   ✓ Acquired S-lock on departments.row.X
+   ✓ Read time: ~1ms
+   Result: 1 row found
+
+4. Perform Join
+   ✓ Join time: <1ms
+   Result: 1 row
+
+5. Commit Transaction
+[2PL] EndTransaction - T2 (COMMIT)
+[2PL] Transaction T2 -> PartiallyCommitted
+[2PL] Transaction T2 -> Committed
+[2PL] Released 0 lock(s) for T2
+[2PL] Transaction T2 -> Terminated - All locks released
+   ✓ Released all locks
+   ✓ Transaction committed: True
+
+------------------------------------------------------------
+PERFORMANCE COMPARISON
+------------------------------------------------------------
+
+Index Seek Approach:
+  ✓ Execution time: ~3ms
+  ✓ Rows scanned: 2
+  ✓ I/O operations: 6 (3 index + 3 data)
+
+Table Scan Alternative (if used):
+  ✗ Execution time: ~500ms
+  ✗ Rows scanned: 10,000
+  ✗ I/O operations: ~10,000
+
+Performance Gain:
+  📊 Speed: 166x faster
+  📊 I/O: 1,666x less disk access
+
+[SUCCESS] Query optimization demonstration completed!
+Note: Full test requires QP, QO, and SM integration
+
+======================================================================
+TEST 4: Timestamp Ordering with Conflicting Writes
+======================================================================
+[INFO] Initializing Timestamp Ordering Protocol...
+[TO] TimestampOrderingManager initialized
+[CCM] ConcurrencyControlManager initialized with protocol: TimestampOrdering
+[INFO] Testing basic timestamp validation rules
+
+--- Sub-test 1: Simple READ and WRITE on same object ---
+[TO] Transaction T2 STARTED with TS=2
+[T1] Transaction started with timestamp
+[TO] ValidateObject - T2: Read on Row:products.100
+[TO] GRANTED: T2 READ Row:products.100 - Updated RTS=2
+[SUCCESS] T1 READ allowed (RTS updated)
+[TO] ValidateObject - T2: Write on Row:products.100
+[TO] GRANTED: T2 WRITE Row:products.100 - Updated WTS=2
+[SUCCESS] T1 WRITE allowed (WTS updated)
+[TO] EndTransaction - T2 (COMMIT)
+[TO] Transaction T2 -> PartiallyCommitted
+[TO] Transaction T2 -> Committed
+[TO] Transaction T2 -> Terminated
+[T1] Commit result: True
+
+--- Sub-test 2: Multiple transactions sequential ---
+[TO] Transaction T3 STARTED with TS=3
+[TO] Transaction T4 STARTED with TS=4
+[INFO] T2 should have lower timestamp than T3
+[T2] Transaction ID: 3
+[T3] Transaction ID: 4
+[TO] ValidateObject - T3: Write on Row:products.200
+[TO] GRANTED: T3 WRITE Row:products.200 - Updated WTS=3
+[TO] ValidateObject - T4: Write on Row:products.300
+[TO] GRANTED: T4 WRITE Row:products.300 - Updated WTS=4
+[SUCCESS] Both transactions can write different objects
+[TO] EndTransaction - T3 (COMMIT)
+[TO] Transaction T3 -> PartiallyCommitted
+[TO] Transaction T3 -> Committed
+[TO] Transaction T3 -> Terminated
+[TO] EndTransaction - T4 (COMMIT)
+[TO] Transaction T4 -> PartiallyCommitted
+[TO] Transaction T4 -> Committed
+[TO] Transaction T4 -> Terminated
+[T2] Commit: True, [T3] Commit: True
+
+--- Sub-test 3: Timestamp Ordering is lock-free ---
+[TO] Transaction T5 STARTED with TS=5
+[TO] Transaction T6 STARTED with TS=6
+[TO] ValidateObject - T5: Read on Row:products.400
+[TO] GRANTED: T5 READ Row:products.400 - Updated RTS=5
+[TO] ValidateObject - T6: Read on Row:products.400
+[TO] GRANTED: T6 READ Row:products.400 - Updated RTS=6
+[SUCCESS] Multiple transactions can read simultaneously (lock-free)
+[TO] EndTransaction - T5 (COMMIT)
+[TO] Transaction T5 -> PartiallyCommitted
+[TO] Transaction T5 -> Committed
+[TO] Transaction T5 -> Terminated
+[TO] EndTransaction - T6 (COMMIT)
+[TO] Transaction T6 -> PartiallyCommitted
+[TO] Transaction T6 -> Committed
+[TO] Transaction T6 -> Terminated
+
+[EVALUATION] All sub-tests passed: True
+
+[SUCCESS] Timestamp Ordering basic validation rules verified!
+  ✓ Timestamps assigned monotonically
+  ✓ RTS/WTS validation works
+  ✓ Lock-free execution confirmed
+
+======================================================================
+TEST 5: Optimistic CC Validation Failure
+======================================================================
+[INFO] Initializing Optimistic Concurrency Control...
+[OCC] OptimisticConcurrencyManager initialized
+[CCM] ConcurrencyControlManager initialized with protocol: OptimisticValidation
+[INFO] Testing ReadSet/WriteSet tracking and validation
+
+--- Sub-test 1: Single transaction (Read + Write) ---
+[OCC] Transaction T2 STARTED (Reading Phase) at TS=2
+[T1] Transaction started (Read Phase)
+[OCC] ValidateObject - T2: Read on Row:inventory.1
+[OCC] GRANTED: T2 READ Row:inventory.1 - Added to ReadSet (size=1)
+[T1] READ allowed (added to ReadSet), no blocking ✓
+[OCC] ValidateObject - T2: Write on Row:inventory.1
+[OCC] GRANTED: T2 WRITE Row:inventory.1 - Added to WriteSet (size=1)
+[T1] WRITE allowed (added to WriteSet), no blocking ✓
+[OCC] EndTransaction - T2 (COMMIT)
+[OCC] Transaction T2 -> Validation Phase at TS=3
+[OCC] Validating T2 against 0 committed transactions
+[OCC] No conflicts found for T2
+[OCC] VALIDATION PASSED: T2
+[OCC] Transaction T2 -> Writing Phase
+[OCC] Transaction T2 -> Committed at TS=4
+[OCC] Transaction T2 -> Terminated
+[T1] COMMIT SUCCESS (Validation passed) ✓
+
+--- Sub-test 2: Non-conflicting transactions ---
+[OCC] Transaction T3 STARTED (Reading Phase) at TS=5
+[OCC] Transaction T4 STARTED (Reading Phase) at TS=6
+[T2] WRITE on item A
+[OCC] ValidateObject - T3: Write on Row:inventory.A
+[OCC] GRANTED: T3 WRITE Row:inventory.A - Added to WriteSet (size=1)
+[T3] WRITE on item B (different object)
+[OCC] ValidateObject - T4: Write on Row:inventory.B
+[OCC] GRANTED: T4 WRITE Row:inventory.B - Added to WriteSet (size=1)
+[OCC] EndTransaction - T3 (COMMIT)
+[OCC] Transaction T3 -> Validation Phase at TS=7
+[OCC] Validating T3 against 1 committed transactions
+[OCC] No conflicts found for T3
+[OCC] VALIDATION PASSED: T3
+[OCC] Transaction T3 -> Writing Phase
+[OCC] Transaction T3 -> Committed at TS=8
+[OCC] Transaction T3 -> Terminated
+[OCC] EndTransaction - T4 (COMMIT)
+[OCC] Transaction T4 -> Validation Phase at TS=9
+[OCC] Validating T4 against 2 committed transactions
+[OCC] No conflicts found for T4
+[OCC] VALIDATION PASSED: T4
+[OCC] Transaction T4 -> Writing Phase
+[OCC] Transaction T4 -> Committed at TS=10
+[OCC] Transaction T4 -> Terminated
+[SUCCESS] Both transactions committed (no WriteSet overlap) ✓
+
+--- Sub-test 3: Concurrent reads (no blocking) ---
+[OCC] Transaction T5 STARTED (Reading Phase) at TS=11
+[OCC] Transaction T6 STARTED (Reading Phase) at TS=12
+[OCC] Transaction T7 STARTED (Reading Phase) at TS=13
+[OCC] ValidateObject - T5: Read on Row:inventory.shared
+[OCC] GRANTED: T5 READ Row:inventory.shared - Added to ReadSet (size=1)
+[OCC] ValidateObject - T6: Read on Row:inventory.shared
+[OCC] GRANTED: T6 READ Row:inventory.shared - Added to ReadSet (size=1)
+[OCC] ValidateObject - T7: Read on Row:inventory.shared
+[OCC] GRANTED: T7 READ Row:inventory.shared - Added to ReadSet (size=1)
+[SUCCESS] Multiple transactions read same object (no blocking) ✓
+[OCC] EndTransaction - T5 (COMMIT)
+[OCC] Transaction T5 -> Validation Phase at TS=14
+[OCC] Validating T5 against 3 committed transactions
+[OCC] No conflicts found for T5
+[OCC] VALIDATION PASSED: T5
+[OCC] Transaction T5 -> Writing Phase
+[OCC] Transaction T5 -> Committed at TS=15
+[OCC] Transaction T5 -> Terminated
+[OCC] EndTransaction - T6 (COMMIT)
+[OCC] Transaction T6 -> Validation Phase at TS=16
+[OCC] Validating T6 against 4 committed transactions
+[OCC] No conflicts found for T6
+[OCC] VALIDATION PASSED: T6
+[OCC] Transaction T6 -> Writing Phase
+[OCC] Transaction T6 -> Committed at TS=17
+[OCC] Transaction T6 -> Terminated
+[OCC] EndTransaction - T7 (COMMIT)
+[OCC] Transaction T7 -> Validation Phase at TS=18
+[OCC] Validating T7 against 5 committed transactions
+[OCC] No conflicts found for T7
+[OCC] VALIDATION PASSED: T7
+[OCC] Transaction T7 -> Writing Phase
+[OCC] Transaction T7 -> Committed at TS=19
+[OCC] Transaction T7 -> Terminated
+[INFO] All readers committed successfully
+
+--- Sub-test 4: Explicit abort ---
+[OCC] Transaction T8 STARTED (Reading Phase) at TS=20
+[OCC] ValidateObject - T8: Write on Row:test.X
+[OCC] GRANTED: T8 WRITE Row:test.X - Added to WriteSet (size=1)
+[OCC] EndTransaction - T8 (ABORT)
+[OCC] Transaction T8 -> Failed
+[OCC] Transaction T8 -> Aborted
+[OCC] Transaction T8 -> Terminated
+[SUCCESS] Transaction aborted, WriteSet discarded ✓
+
+[EVALUATION] All sub-tests passed: True
+
+[SUCCESS] Optimistic CC basic operations verified!
+  ✓ Read Phase allows all operations without blocking
+  ✓ ReadSet and WriteSet tracked correctly
+  ✓ Validation Phase works for non-conflicting transactions
+  ✓ No locks (fully optimistic)
+
+======================================================================
+SYSTEM TEST RESULTS
+======================================================================
+Total Tests: 5
+[SUCCESS] Passed: 3
+[FAILED] Failed: 2
+Success Rate: 60,0%
+======================================================================
+
+Press any key to exit...
+
