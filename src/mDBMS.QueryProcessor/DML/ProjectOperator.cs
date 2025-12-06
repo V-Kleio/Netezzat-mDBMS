@@ -9,6 +9,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
     {
         foreach (Row row in node.Input.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId)))
         {
+            Console.WriteLine($"[INFO] Melakukan Projection");
+
             Row projectedRow = new() { id = row.id };
 
             foreach (string column in node.Columns)

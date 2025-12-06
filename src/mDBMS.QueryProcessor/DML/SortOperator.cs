@@ -9,6 +9,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 
     public IEnumerable<Row> VisitSortNode(SortNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Sort");
+
         if (cachedRows != null) return cachedRows;
 
         Row[] rows = node.Input.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId)).ToArray();

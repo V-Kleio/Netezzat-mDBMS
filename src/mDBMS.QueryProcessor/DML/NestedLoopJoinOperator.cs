@@ -8,6 +8,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
     public IEnumerable<Row> NestedLoopJoin(JoinNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Nested Loop Join antara 2 tabel");
+
         IEnumerable<Row> lhs = node.Left.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId));
         IEnumerable<Row> rhs = node.Right.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId));
 

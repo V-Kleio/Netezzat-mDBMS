@@ -8,6 +8,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
     public IEnumerable<Row> VisitInsertNode(InsertNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Insert pada tabel: {node.TableName}");
+
         Dictionary<string, object> newData = [];
 
         foreach (var (column, value) in node.Columns.Zip(node.Values))

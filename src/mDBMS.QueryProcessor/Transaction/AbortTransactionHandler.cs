@@ -16,6 +16,8 @@ namespace mDBMS.QueryProcessor.Transaction
 
         public ExecutionResult HandleQuery(string query, int transactionId)
         {
+            Console.WriteLine($"[INFO] Operasi Abort diterima");
+
             if (transactionId == -1) // Cek apakah ada transaksi aktif
             {
                 return new ExecutionResult()

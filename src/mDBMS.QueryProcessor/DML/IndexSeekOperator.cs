@@ -7,6 +7,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
     public IEnumerable<Row> VisitIndexSeekNode(IndexSeekNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Index Seek untuk tabel: {node.TableName}");
+
         Condition[] seekConditions = node.SeekConditions.ToArray();
 
         foreach (Condition condition in seekConditions)
@@ -48,6 +50,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
             {
                 canonRow[$"{node.TableName}." + key] = val;
             }
+
+            Console.Write($"[INFO] Retrieved row with id: {row.id}");
 
             yield return canonRow;
         }
