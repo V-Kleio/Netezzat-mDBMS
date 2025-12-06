@@ -45,7 +45,7 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
                 if (rightKeys is null)
                 {
                     rightKeys = [];
-    
+
                     foreach (var (key, val) in rightRow.Columns)
                     {
                         rightKeys[key] = val.GetType();
@@ -62,7 +62,7 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
                     throw new Exception("join column not found on rhs");
                 }
 
-                if (leftRow[(string) node.JoinCondition.lhs] == rightRow[(string) node.JoinCondition.rhs])
+                if (Equals(leftRow[(string) node.JoinCondition.lhs], rightRow[(string) node.JoinCondition.rhs]))
                 {
                     matches = true;
 
@@ -76,7 +76,7 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
                     }
 
                     Row row = new();
-                    
+
                     foreach (var (key, val) in leftRow.Columns)
                     {
                         row[key] = val;
@@ -122,7 +122,7 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
                     row[key] = val;
                 }
 
-                foreach (var (key, val) in rightKeys!)
+                foreach (var (key, val) in leftKeys!)
                 {
                     row[key] = RuntimeHelpers.GetUninitializedObject(val);
                 }

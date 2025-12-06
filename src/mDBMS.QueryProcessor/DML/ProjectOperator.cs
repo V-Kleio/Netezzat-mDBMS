@@ -13,7 +13,14 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 
             foreach (string column in node.Columns)
             {
-                projectedRow[column] = row[column];
+                if (row.Columns.TryGetValue(column, out var value))
+                {
+                    projectedRow[column] = value;
+                }
+                else
+                {
+                    throw new Exception($"Column '{column}' not found in row. Available columns: {string.Join(", ", row.Columns.Keys)}");
+                }
             }
 
             yield return projectedRow;
