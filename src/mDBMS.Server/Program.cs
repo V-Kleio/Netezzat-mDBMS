@@ -7,6 +7,7 @@ using mDBMS.QueryOptimizer;
 using mDBMS.QueryProcessor;
 using mDBMS.StorageManager;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -15,6 +16,8 @@ class Server
 {
     public static void Main(string[] args)
     {
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+
         short port = 5761;
 
         if (args.Length > 0)

@@ -2,11 +2,14 @@ using System.Net;
 using mDBMS.Common.Transaction;
 using mDBMS.CLI;
 using System.Text;
+using System.Globalization;
 
 class CLI
 {
     public static void Main(string[] args)
     {
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+
         IPAddress host = IPAddress.Loopback;
         short port = 5761;
 
@@ -121,7 +124,7 @@ class CLI
                 }
                 Console.WriteLine(rowLine);
             }
-            
+
             Console.WriteLine(headerLine);
             Console.WriteLine($"{data.Count} row(s) returned.\n");
         }

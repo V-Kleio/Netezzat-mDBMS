@@ -54,15 +54,7 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
             foreach (var (key, val) in node.UpdateOperations)
             {
                 Type valtype = row[key].GetType();
-                object? parsedValue = val;
-                
-                try
-                {
-                    parsedValue = valtype.GetMethod("Parse")?.Invoke(null, [val]) ?? val;
-                }
-                catch (Exception)
-                {
-                }
+                object? parsedValue = Convert.ChangeType(val, valtype) ?? val;
 
                 string localKey = key;
 
