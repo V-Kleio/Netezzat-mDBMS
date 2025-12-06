@@ -411,16 +411,12 @@ namespace mDBMS.StorageManager
 
                     if (modified)
                     {
-                        if (survivingRows.Count > 0)
-                        {
-                            var serialized = survivingRows.Select(r => RowSerializer.SerializeRow(schema, r)).ToList();
-                            byte[] newBlock = BlockSerializer.CreateBlock(serialized);
+                        var serialized = survivingRows.Select(r => RowSerializer.SerializeRow(schema, r)).ToList();
+                        byte[] newBlock = BlockSerializer.CreateBlock(serialized);
 
-                            // Write to buffer
-                            Page page = new(tableName, blockID, newBlock, true);
+                        // Write to buffer
+                        Page page = new(tableName, blockID, newBlock, true);
                             _bufferManager.WriteToBuffer(page);
-                        }
-                        // If no surviving rows, block is empty - could handle deletion
                     }
 
                 }

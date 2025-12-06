@@ -9,6 +9,10 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
     public IEnumerable<Row> HashJoin(JoinNode node)
     {
         Console.WriteLine($"[INFO] Melakukan Hash Join antara 2 tabel");
+        if (node.JoinCondition == null)
+        {
+            throw new Exception("HashJoin requires a join condition. Use CrossJoin for Cartesian product.");
+        }
 
         string ljoin = (string) node.JoinCondition.lhs;
         string rjoin = (string) node.JoinCondition.rhs;
@@ -56,26 +60,26 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
                 foreach (Row leftRow in bucket.Matchers)
                 {
                     Row row = new();
-                        
+
                     foreach (var (key, val) in leftRow.Columns)
                     {
                         row[key] = val;
                     }
-    
+
                     foreach (var (key, val) in rightRow.Columns)
                     {
                         row[key] = val;
                     }
-    
+
                     row.id = leftRow.id + ";" + rightRow.id;
-    
+
                     yield return row;
                 }
             }
             else if (node.JoinType == JoinType.RIGHT || node.JoinType == JoinType.FULL)
             {
                 Row row = new();
-                        
+
                 foreach (var (key, val) in leftKeys)
                 {
                     row[key] = RuntimeHelpers.GetUninitializedObject(val);
@@ -101,19 +105,19 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
                     foreach (Row leftRow in bucket.Matchers)
                     {
                         Row row = new();
-                        
+
                         foreach (var (key, val) in leftRow.Columns)
                         {
                             row[key] = val;
                         }
-        
+
                         foreach (var (key, val) in rightKeys)
                         {
                             row[key] = RuntimeHelpers.GetUninitializedObject(val);
                         }
-        
+
                         row.id = leftRow.id;
-        
+
                         yield return row;
                     }
                 }

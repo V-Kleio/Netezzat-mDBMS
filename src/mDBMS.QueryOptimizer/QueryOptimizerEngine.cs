@@ -8,12 +8,12 @@ namespace mDBMS.QueryOptimizer
     /// <summary>
     /// Engine utama untuk Query Optimization.
     /// Orchestrator yang mengkoordinasikan parsing, building, dan optimization.
-    /// 
+    ///
     /// Flow:
     /// 1. ParseQuery: SQL string -> Query object (via SqlLexer + SqlParser)
     /// 2. OptimizeQuery: Query object -> QueryPlan dengan PlanNode tree
     /// 3. Return: QueryPlan (dengan PlanTree dan Steps untuk backward compatibility)
-    /// 
+    ///
     /// Principle: Orchestration - delegate ke specialized components
     /// </summary>
     public class QueryOptimizerEngine : IQueryOptimizer {
@@ -48,7 +48,7 @@ namespace mDBMS.QueryOptimizer
 
         /// <summary>
         /// Mengoptimalkan query dan menghasilkan execution plan yang efisien.
-        /// 
+        ///
         /// QueryPlan.PlanTree berisi tree structure.
         /// QueryPlan.Steps berisi flat list (generated dari tree) untuk backward compatibility.
         /// </summary>
@@ -56,8 +56,18 @@ namespace mDBMS.QueryOptimizer
         /// <returns>Optimized query execution plan dengan tree dan flat steps</returns>
         public QueryPlan OptimizeQuery(Query query) {
             // Validate main table exists (will throw if table not found)
-            ValidateTableExists(query.Table);
-            
+            if (query.FromTables != null && query.FromTables.Count > 1)
+            {
+                foreach (var table in query.FromTables)
+                {
+                    ValidateTableExists(table);
+                }
+            }
+            else
+            {
+                ValidateTableExists(query.Table);
+            }
+
             // Validate JOIN tables if any
             if (query.Joins != null)
             {
@@ -325,12 +335,12 @@ namespace mDBMS.QueryOptimizer
         {
             // Build plan tree for SELECT query
             PlanNode planTree = _planBuilder.BuildPlan(selectQuery);
-            
+
             // Convert to QueryPlan
             var queryPlan = planTree.ToQueryPlan();
             queryPlan.OriginalQuery = selectQuery;
             queryPlan.PlanTree = planTree;
-            
+
             return queryPlan;
         }
 
@@ -369,7 +379,7 @@ namespace mDBMS.QueryOptimizer
             // Untuk sekarang, hanya return satu optimal plan dari PlanBuilder
             yield return OptimizeQuery(query);
         }
-    
+
 
 
         /// <summary>

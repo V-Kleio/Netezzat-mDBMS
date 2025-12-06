@@ -44,6 +44,21 @@ internal sealed class SqlParser
         };
     }
 
+    private List<string> ParseTableList()
+    {
+        var tables = new List<string>
+        {
+            ParseIdentifier()
+        };
+
+        while (Match(SqlTokenType.COMMA))
+        {
+            tables.Add(ParseIdentifier());
+        }
+
+        return tables;
+    }
+
     /// <summary>
     /// Parse SELECT ... FROM ... [JOIN ... ON ...]* [WHERE ...] [GROUP BY ...] [ORDER BY ...]
     /// </summary>
@@ -54,13 +69,27 @@ internal sealed class SqlParser
         Expect(SqlTokenType.SELECT);
         q.SelectedColumns = ParseSelectList();
         Expect(SqlTokenType.FROM);
-        q.Table = ParseIdentifier();
+        var tables = ParseTableList();
+
+        Console.WriteLine($"[SqlParser] Parsed {tables.Count} tables from FROM clause: {string.Join(", ", tables)}");
+
+        if (tables.Count == 1)
+        {
+            q.Table = tables[0];
+            q.FromTables = null;
+        }
+        else
+        {
+            q.Table = tables[0];
+            q.FromTables = tables;
+        }
 
         // JOINs
         var joins = new List<JoinOperation>();
         while (IsJoinStart())
         {
-            joins.Add(ParseJoin(q.Table));
+            string leftTable = tables.Count > 1 ? string.Join(",", tables) : q.Table;
+            joins.Add(ParseJoin(leftTable));
         }
         if (joins.Count > 0) q.Joins = joins;
 

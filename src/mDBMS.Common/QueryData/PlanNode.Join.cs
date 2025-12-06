@@ -25,7 +25,7 @@ public sealed class JoinNode : PlanNode
     /// <summary>
     /// Kondisi join (ON clause).
     /// </summary>
-    public Condition JoinCondition { get; set; }
+    public Condition? JoinCondition { get; set; }
 
     /// <summary>
     /// Algoritma yang digunakan untuk join.
@@ -36,7 +36,7 @@ public sealed class JoinNode : PlanNode
     public override string OperationName => $"{JoinType}_{Algorithm}_JOIN";
     public override string Details => $"ON {JoinCondition}";
 
-    public JoinNode(PlanNode left, PlanNode right, JoinType joinType, Condition condition)
+    public JoinNode(PlanNode left, PlanNode right, JoinType joinType, Condition? condition)
     {
         Left = left;
         Right = right;
