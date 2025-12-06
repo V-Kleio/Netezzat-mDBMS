@@ -62,7 +62,7 @@ class Program
         {
             // Step 1: Parse query
             var query = optimizer.ParseQuery(sql);
-            Console.WriteLine($"✓ Parsed successfully");
+            Console.WriteLine($"Parsed successfully");
             Console.WriteLine($"  Table: {query.Table}");
             Console.WriteLine($"  Columns: {string.Join(", ", query.SelectedColumns)}");
             if (!string.IsNullOrWhiteSpace(query.WhereClause))
@@ -72,12 +72,12 @@ class Program
 
             // Step 2: Optimize query (get QueryPlan with embedded tree)
             var queryPlan = optimizer.OptimizeQuery(query);
-            Console.WriteLine($"\n✓ Optimized successfully");
+            Console.WriteLine($"\nOptimized successfully");
             
             // Step 3: Verify PlanTree is embedded
             if (queryPlan.PlanTree != null)
             {
-                Console.WriteLine("✓ QueryPlan contains PlanTree");
+                Console.WriteLine("QueryPlan contains PlanTree");
             }
             
             // Step 4: Print plan tree
