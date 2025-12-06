@@ -6,11 +6,14 @@ namespace mDBMS.ConcurrencyControl.Tests
         {
             Console.WriteLine("Starting Concurrency Control Tests...\n");
 
-            // Jalankan Test Suite
+            // Optimistic Concurrency Control
             OptimisticCCMTest.RunAllTests();
 
+            // Timestamp Ordering Protocol
+            TimestampCCMTest.RunAllTests();
+
             Console.WriteLine("\nPress any key to exit...");
-            // Console.ReadKey(); // Opsional, uncomment jika ingin window tetap terbuka
+            // Console.ReadKey();
         }
     }
 }
