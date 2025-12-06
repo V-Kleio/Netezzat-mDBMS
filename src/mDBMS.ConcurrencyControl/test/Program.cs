@@ -6,11 +6,15 @@ namespace mDBMS.ConcurrencyControl.Tests
         {
             Console.WriteLine("Starting Concurrency Control Tests...\n");
 
-            // Jalankan Test Suite
+            // Test Optimistic
             OptimisticCCMTest.RunAllTests();
 
-            Console.WriteLine("\nPress any key to exit...");
-            // Console.ReadKey(); // Opsional, uncomment jika ingin window tetap terbuka
+            Console.WriteLine("\n");
+
+            // Test Two-Phase Locking
+            TwoPhaseLockingCCMTest.RunAllTests();
+
+            Console.WriteLine("\nAll tests completed!");
         }
     }
 }
