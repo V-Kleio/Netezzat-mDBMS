@@ -45,7 +45,8 @@ namespace mDBMS.QueryProcessor
                 {
                     Query = string.Empty,
                     Success = false,
-                    Message = "Query tidak boleh kosong."
+                    Message = "Query tidak boleh kosong.",
+                    TransactionId = transactionId
                 };
             }
 
@@ -63,7 +64,8 @@ namespace mDBMS.QueryProcessor
                 {
                     Query = normalizedQuery,
                     Success = false,
-                    Message = "Tipe query tidak dikenali atau belum didukung."
+                    Message = "Tipe query tidak dikenali atau belum didukung.",
+                    TransactionId = transactionId
                 };
             }
             catch (Exception ex)
@@ -72,7 +74,8 @@ namespace mDBMS.QueryProcessor
                 {
                     Query = normalizedQuery,
                     Success = false,
-                    Message = $"Terjadi kesalahan saat mengeksekusi query: {ex.Message}"
+                    Message = $"Terjadi kesalahan saat mengeksekusi query: {ex.Message}",
+                    TransactionId = transactionId
                 };
             }
         }

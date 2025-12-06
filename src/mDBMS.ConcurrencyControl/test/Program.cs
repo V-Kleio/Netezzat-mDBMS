@@ -6,13 +6,18 @@ namespace mDBMS.ConcurrencyControl.Tests
         {
             Console.WriteLine("Starting Concurrency Control Tests...\n");
 
-            // Test Optimistic
+            // Test Optimistic Concurrency Control
             OptimisticCCMTest.RunAllTests();
 
             Console.WriteLine("\n");
 
             // Test Two-Phase Locking
             TwoPhaseLockingCCMTest.RunAllTests();
+
+            Console.WriteLine("\n");
+
+            // Test Timestamp Ordering Protocol
+            TimestampCCMTest.RunAllTests();
 
             Console.WriteLine("\nAll tests completed!");
         }
