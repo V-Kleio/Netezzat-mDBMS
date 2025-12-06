@@ -8,6 +8,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
     public IEnumerable<Row> MergeJoin(JoinNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Merge Join antara 2 tabel");
+
         string ljoin = (string) node.JoinCondition.lhs;
         string rjoin = (string) node.JoinCondition.rhs;
 

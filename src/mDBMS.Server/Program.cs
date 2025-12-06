@@ -9,6 +9,7 @@ using mDBMS.StorageManager;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 
 class Server
 {
@@ -34,14 +35,16 @@ class Server
         int initialBufferSize = 4096;
 
         var qpProxy = LateProxy<IQueryProcessor>.Create();
+        var bmProxy = LateProxy<IBufferManager>.Create();
 
-        var sm = new StorageEngine();
+        var sm = new StorageEngine(bmProxy);
         var qo = new QueryOptimizerEngine(sm);
         var ccm = new ConcurrencyControlManager();
         var frm = new FailureRecoveryManager(qpProxy, sm);
         var qp = new QueryProcessor(sm, qo, ccm, frm);
 
         ((LateProxy<IQueryProcessor>)qpProxy).SetTarget(qp);
+        ((LateProxy<IBufferManager>)bmProxy).SetTarget(frm);
 
         IPEndPoint endpoint = new(IPAddress.Loopback, port);
 

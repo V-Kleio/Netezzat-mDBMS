@@ -8,6 +8,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
     public IEnumerable<Row> VisitUpdateNode(UpdateNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Update pada tabel {node.TableName}");
+
         foreach (Row row in node.Input.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId)))
         {
             foreach (string rowId in row.id.Split(';'))

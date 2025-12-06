@@ -8,6 +8,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
     public IEnumerable<Row> HashJoin(JoinNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Hash Join antara 2 tabel");
+
         string ljoin = (string) node.JoinCondition.lhs;
         string rjoin = (string) node.JoinCondition.rhs;
 

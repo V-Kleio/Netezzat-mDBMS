@@ -19,6 +19,8 @@ namespace mDBMS.QueryProcessor.DML
 
         public ExecutionResult HandleQuery(string query, int transactionId)
         {
+            Console.WriteLine($"[INFO] Operasi DML diterima");
+
             bool temporaryTransaction = transactionId == -1;
 
             if (temporaryTransaction)
@@ -111,6 +113,9 @@ namespace mDBMS.QueryProcessor.DML
                     TransactionId = -1,
                 };
             }
+
+            if (returnData)
+                Console.WriteLine($"[INFO] Got {resultData.Count} rows");
 
             return new ExecutionResult()
             {

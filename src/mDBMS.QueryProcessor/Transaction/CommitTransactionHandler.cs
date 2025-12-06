@@ -16,6 +16,8 @@ namespace mDBMS.QueryProcessor.Transaction
 
         public ExecutionResult HandleQuery(string query, int transactionId)
         {
+            Console.WriteLine($"[INFO] Operasi Commit diterima");
+
             if (transactionId == -1) 
             {
                 return new ExecutionResult()

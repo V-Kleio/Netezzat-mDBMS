@@ -55,7 +55,34 @@ class Program
             return args[0];
         }
 
-        return Path.Combine(Environment.CurrentDirectory, "data");
+        return GetDefaultDataPath();
+    }
+
+    /// <summary>
+    /// Gets the default data path (same as StorageEngine)
+    /// </summary>
+    private static string GetDefaultDataPath()
+    {
+        string currentDir = Directory.GetCurrentDirectory();
+        DirectoryInfo? dir = new DirectoryInfo(currentDir);
+
+        while (dir != null)
+        {
+            if (dir.GetFiles("*.sln").Length > 0)
+            {
+                return Path.Combine(dir.FullName, "data");
+            }
+            dir = dir.Parent;
+        }
+
+        // Fallback
+        string? customPath = Environment.GetEnvironmentVariable("MDBMS_DATA_PATH");
+        if (!string.IsNullOrEmpty(customPath))
+        {
+            return customPath;
+        }
+
+        return Path.Combine(currentDir, "data");
     }
 
     static void ShowDatabaseStats(string dataPath)
