@@ -37,7 +37,7 @@ namespace mDBMS.QueryProcessor.Transaction
                 Query = query,
                 Success = true,
                 Message = $"Transaksi {transactionId} berhasil di-COMMIT.",
-                TransactionId = transactionId
+                TransactionId = -1
             };
         }
     }
