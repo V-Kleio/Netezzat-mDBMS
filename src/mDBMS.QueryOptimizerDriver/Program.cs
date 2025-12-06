@@ -42,6 +42,8 @@ class Program
 
         RunTestCase(optimizer, "Complex query pada enrollments",
             "SELECT student_id, course_id FROM enrollments WHERE grade > 70 ORDER BY grade ASC");
+        RunTestCase(optimizer, "JOIN antara students dan enrollments",
+            "SELECT students.name, enrollments.course_id FROM students INNER JOIN enrollments ON students.id = enrollments.student_id WHERE enrollments.grade >= 80 ORDER BY students.name ASC");
 
         // Run edge case tests
         Console.WriteLine("\n\n");
