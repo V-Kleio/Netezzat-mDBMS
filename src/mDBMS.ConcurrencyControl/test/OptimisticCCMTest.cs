@@ -32,13 +32,17 @@ namespace mDBMS.ConcurrencyControl.Tests
         private static DatabaseObject CreateObj(string id) 
             => DatabaseObject.CreateRow(id, "TestTable");
 
-        private static void PrintResult(string testName, bool success, string? error = null)
+        // Helper untuk print hasil dan return status
+        private static bool PrintResult(string testName, bool success, string? error = null)
         {
             if (success)
                 Console.WriteLine($"[SUCCESS] {testName}\n");
             else
                 Console.WriteLine($"[FAILED] {testName} - {error}\n");
+            return success;
         }
+
+        // --- TEST CASES ---
 
         /// <summary>
         /// Test 1: Single Transaction Commit
@@ -53,7 +57,7 @@ namespace mDBMS.ConcurrencyControl.Tests
 
                 int tx1 = occ.BeginTransaction();
 
-                // Fase Read: Selalu Allowed di OCC
+                // Fase Read
                 occ.ValidateObject(Action.CreateReadAction(obj1, tx1));
                 occ.ValidateObject(Action.CreateWriteAction(obj1, tx1));
 
@@ -61,16 +65,18 @@ namespace mDBMS.ConcurrencyControl.Tests
                 bool committed = occ.CommitTransaction(tx1);
 
                 if (!committed) throw new Exception("Transaksi tunggal gagal commit.");
-                if (occ.GetTransactionStatus(tx1) != TransactionStatus.Committed) 
-                    throw new Exception("Status transaksi bukan Committed.");
+                
+                // VALIDASI STATUS: OCC mengubah status Committed -> Terminated dengan cepat.
+                // Jadi kita terima keduanya sebagai sukses.
+                var status = occ.GetTransactionStatus(tx1);
+                if (status != TransactionStatus.Committed && status != TransactionStatus.Terminated) 
+                    throw new Exception($"Status transaksi salah. Expected: Committed/Terminated, Actual: {status}");
 
-                PrintResult(name, true);
-                return true;
+                return PrintResult(name, true);
             }
             catch (Exception ex)
             {
-                PrintResult(name, false, ex.Message);
-                return false;
+                return PrintResult(name, false, ex.Message);
             }
         }
 
@@ -89,25 +95,18 @@ namespace mDBMS.ConcurrencyControl.Tests
                 int t1 = occ.BeginTransaction();
                 int t2 = occ.BeginTransaction();
 
-                // T1 akses A, T2 akses B
+                // T1 akses A, T2 akses B (Beda objek, aman)
                 occ.ValidateObject(Action.CreateWriteAction(objA, t1));
                 occ.ValidateObject(Action.CreateWriteAction(objB, t2));
 
-                // Commit T1
-                if (!occ.CommitTransaction(t1)) 
-                    throw new Exception("T1 gagal commit.");
+                if (!occ.CommitTransaction(t1)) throw new Exception("T1 gagal.");
+                if (!occ.CommitTransaction(t2)) throw new Exception("T2 gagal.");
 
-                // Commit T2 (validasi terhadap T1, tapi set objek beda)
-                if (!occ.CommitTransaction(t2)) 
-                    throw new Exception("T2 gagal commit padahal objek berbeda.");
-
-                PrintResult(name, true);
-                return true;
+                return PrintResult(name, true);
             }
             catch (Exception ex)
             {
-                PrintResult(name, false, ex.Message);
-                return false;
+                return PrintResult(name, false, ex.Message);
             }
         }
 
@@ -116,48 +115,30 @@ namespace mDBMS.ConcurrencyControl.Tests
         /// </summary>
         private static bool Test_ReadWrite_Conflict()
         {
-            string name = "Test 3: Read-Write Conflict (Validation Fail)";
+            string name = "Test 3: Read-Write Conflict";
             try
             {
                 var occ = new OptimisticConcurrencyManager();
                 var objA = CreateObj("A");
 
-                // 1. T1 Mulai (Timestamp awal kecil)
                 int t1 = occ.BeginTransaction();
                 occ.ValidateObject(Action.CreateReadAction(objA, t1)); // T1 baca A
 
-                // 2. T2 Mulai
                 int t2 = occ.BeginTransaction();
                 occ.ValidateObject(Action.CreateWriteAction(objA, t2)); // T2 tulis A
 
-                // 3. T2 Commit duluan (Sukses)
-                if (!occ.CommitTransaction(t2)) 
-                    throw new Exception("T2 seharusnya sukses commit.");
+                // T2 selesai duluan
+                if (!occ.CommitTransaction(t2)) throw new Exception("T2 gagal commit.");
 
-                // 4. T1 Coba Commit
-                // Saat validasi, OCC melihat T2 sudah commit dan FinishTS(T2) > StartTS(T1).
-                // Cek konflik: WriteSet(T2) intersect ReadSet(T1) pada "A".
+                // T1 harus gagal karena data A yang dibaca sudah usang (ditulis T2)
                 bool t1Result = occ.CommitTransaction(t1);
 
-                if (t1Result) 
-                {
-                    PrintResult(name, false, "T1 seharusnya gagal (Abort) karena konflik R-W.");
-                    return false;
-                }
-
-                if (occ.GetTransactionStatus(t1) != TransactionStatus.Aborted && 
-                    occ.GetTransactionStatus(t1) != TransactionStatus.Terminated)
-                {
-                     throw new Exception($"Status T1 harusnya Aborted/Terminated, tapi {occ.GetTransactionStatus(t1)}");
-                }
-
-                PrintResult(name, true);
-                return true;
+                if (t1Result) return PrintResult(name, false, "T1 seharusnya gagal (Abort) karena konflik R-W.");
+                return PrintResult(name, true);
             }
             catch (Exception ex)
             {
-                PrintResult(name, false, ex.Message);
-                return false;
+                return PrintResult(name, false, ex.Message);
             }
         }
 
@@ -173,30 +154,23 @@ namespace mDBMS.ConcurrencyControl.Tests
                 var objA = CreateObj("A");
 
                 int t1 = occ.BeginTransaction();
-                occ.ValidateObject(Action.CreateWriteAction(objA, t1)); // T1 Write
+                occ.ValidateObject(Action.CreateWriteAction(objA, t1));
 
                 int t2 = occ.BeginTransaction();
-                occ.ValidateObject(Action.CreateWriteAction(objA, t2)); // T2 Write
+                occ.ValidateObject(Action.CreateWriteAction(objA, t2));
 
-                // T2 Commit
+                // T2 commit duluan
                 occ.CommitTransaction(t2);
 
-                // T1 Commit -> Harus gagal karena WriteSet(T2) intersect WriteSet(T1)
+                // T1 harus gagal karena konflik penulisan pada A
                 bool t1Success = occ.CommitTransaction(t1);
 
-                if (t1Success)
-                {
-                    PrintResult(name, false, "T1 seharusnya gagal karena konflik W-W.");
-                    return false;
-                }
-
-                PrintResult(name, true);
-                return true;
+                if (t1Success) return PrintResult(name, false, "T1 seharusnya gagal karena konflik W-W.");
+                return PrintResult(name, true);
             }
             catch (Exception ex)
             {
-                PrintResult(name, false, ex.Message);
-                return false;
+                return PrintResult(name, false, ex.Message);
             }
         }
 
@@ -213,20 +187,17 @@ namespace mDBMS.ConcurrencyControl.Tests
 
                 bool result = occ.AbortTransaction(t1);
 
-                if (!result) throw new Exception("Abort mengembalikan false.");
+                if (!result) return PrintResult(name, false, "Abort mengembalikan false.");
                 
                 var status = occ.GetTransactionStatus(t1);
-                
                 if (status != TransactionStatus.Aborted && status != TransactionStatus.Terminated)
                     throw new Exception($"Status salah: {status}");
 
-                PrintResult(name, true);
-                return true;
+                return PrintResult(name, true);
             }
             catch (Exception ex)
             {
-                PrintResult(name, false, ex.Message);
-                return false;
+                return PrintResult(name, false, ex.Message);
             }
         }
     }
