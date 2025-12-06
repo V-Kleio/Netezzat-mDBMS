@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace mDBMS.Common.Net
@@ -10,7 +11,7 @@ namespace mDBMS.Common.Net
 
             var span = new Span<byte>(data, lowerbound, length);
 
-            QueryPayload? payload = JsonSerializer.Deserialize<QueryPayload>(span.ToString()) ?? throw new Exception("could not deserialize query payload");
+            QueryPayload? payload = JsonSerializer.Deserialize<QueryPayload>(Encoding.UTF8.GetString(span)) ?? throw new Exception("could not deserialize query payload");
             return (payload.Query, payload.TransactionId);
         }
     }

@@ -4,14 +4,30 @@ using mDBMS.Common.Transaction;
 
 namespace mDBMS.Common.Net;
 
-class ExecutionResultPayload(ExecutionResult result)
+class ExecutionResultPayload
 {
-    public int TransactionId = result.TransactionId;
-    public string Query = result.Query;
-    public bool Success = result.Success;
-    public string Message = result.Message;
-    public DateTime ExecutedAt = result.ExecutedAt;
-    [JsonInclude] private readonly IEnumerable<EncodedRow>? data = result.Data?.Select(row => new EncodedRow(row));
+    [JsonInclude] public int TransactionId;
+    [JsonInclude] public string Query;
+    [JsonInclude] public bool Success;
+    [JsonInclude] public string Message;
+    [JsonInclude] public DateTime ExecutedAt;
+    [JsonInclude] private readonly IEnumerable<EncodedRow>? data;
+
+    public ExecutionResultPayload()
+    {
+        Query = "";
+        Message = "";
+    }
+
+    public ExecutionResultPayload(ExecutionResult result)
+    {
+        this.TransactionId = result.TransactionId;
+        this.Query = result.Query;
+        this.Success = result.Success;
+        this.Message = result.Message;
+        this.ExecutedAt = result.ExecutedAt;
+        this.data = result.Data?.Select(row => new EncodedRow(row));
+    }
 
     public ExecutionResult Extract()
     {
@@ -28,8 +44,8 @@ class ExecutionResultPayload(ExecutionResult result)
 
     private class EncodedRow
     {
-        public string Id;
-        public Dictionary<string, EncodedDatum> Columns;
+        [JsonInclude] public string Id;
+        [JsonInclude] public Dictionary<string, EncodedDatum> Columns;
 
         public EncodedRow(Row row)
         {
@@ -59,8 +75,8 @@ class ExecutionResultPayload(ExecutionResult result)
 
         public class EncodedDatum
         {
-            public string type = typeof(int).ToString();
-            public string value = "0";
+            [JsonInclude] public string type = typeof(int).ToString();
+            [JsonInclude] public string value = "0";
 
             public EncodedDatum(object? datum)
             {
