@@ -24,13 +24,6 @@ namespace mDBMS.QueryProcessor.DML
             if (temporaryTransaction)
             {
                 transactionId = _concurrencyControlManager.BeginTransaction();
-                _failureRecoveryManager.WriteLog(new()
-                {
-                    Operation = ExecutionLog.OperationType.BEGIN,
-                    TransactionId = transactionId,
-                    TableName = "",
-                    RowIdentifier = "",
-                });
             }
 
             string upper = query.Split()[0].Trim().ToUpperInvariant();
@@ -46,13 +39,6 @@ namespace mDBMS.QueryProcessor.DML
             if (temporaryTransaction && result.TransactionId != -1)
             {
                 _concurrencyControlManager.CommitTransaction(transactionId);
-                _failureRecoveryManager.WriteLog(new()
-                {
-                    Operation = ExecutionLog.OperationType.COMMIT,
-                    TransactionId = transactionId,
-                    TableName = "",
-                    RowIdentifier = "",
-                });
 
                 result.TransactionId = -1;
             }
@@ -113,14 +99,6 @@ namespace mDBMS.QueryProcessor.DML
                 if (transactionId != -1)
                 {
                     _concurrencyControlManager.AbortTransaction(transactionId);
-                    _failureRecoveryManager.WriteLog(new()
-                    {
-                        Operation = ExecutionLog.OperationType.ABORT,
-                        TransactionId = transactionId,
-                        TableName = "",
-                        RowIdentifier = "",
-                    });
-
                     _failureRecoveryManager.UndoTransaction(transactionId);
                 }
 

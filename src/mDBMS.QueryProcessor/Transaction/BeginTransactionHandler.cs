@@ -28,13 +28,6 @@ namespace mDBMS.QueryProcessor.Transaction
             }
 
             transactionId = _concurrencyControlManager.BeginTransaction();
-            _failureRecoveryManager.WriteLog(new()
-            {
-                Operation = ExecutionLog.OperationType.BEGIN,
-                TransactionId = transactionId,
-                TableName = "",
-                RowIdentifier = "",
-            });
 
             return new ExecutionResult()
             {
