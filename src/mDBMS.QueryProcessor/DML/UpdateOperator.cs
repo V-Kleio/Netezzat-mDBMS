@@ -8,6 +8,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
     public IEnumerable<Row> VisitUpdateNode(UpdateNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Update pada tabel {node.TableName}");
+
         foreach (Row row in node.Input.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId)))
         {
             foreach (string rowId in row.id.Split(';'))
@@ -31,10 +33,13 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
             int index = 0;
             foreach (var (key, val) in row.Columns)
             {
-                conditions[index].rel = Condition.Relation.COLUMN_AND_VALUE;
-                conditions[index].opr = Condition.Operation.EQ;
-                conditions[index].lhs = key;
-                conditions[index].rhs = val;
+                conditions[index] = new()
+                {
+                    rel = Condition.Relation.COLUMN_AND_VALUE,
+                    opr = Condition.Operation.EQ,
+                    lhs = key,
+                    rhs = val
+                };
 
                 if (key.StartsWith($"{node.TableName}."))
                 {
@@ -49,15 +54,7 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
             foreach (var (key, val) in node.UpdateOperations)
             {
                 Type valtype = row[key].GetType();
-                object? parsedValue = val;
-                
-                try
-                {
-                    parsedValue = valtype.GetMethod("Parse")?.Invoke(null, [val]) ?? val;
-                }
-                catch (Exception)
-                {
-                }
+                object? parsedValue = Convert.ChangeType(val, valtype) ?? val;
 
                 string localKey = key;
 

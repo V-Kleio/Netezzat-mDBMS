@@ -16,6 +16,8 @@ namespace mDBMS.QueryProcessor.Transaction
 
         public ExecutionResult HandleQuery(string query, int transactionId)
         {
+            Console.WriteLine($"[INFO] Operasi Abort diterima");
+
             if (transactionId == -1) // Cek apakah ada transaksi aktif
             {
                 return new ExecutionResult()
@@ -29,14 +31,6 @@ namespace mDBMS.QueryProcessor.Transaction
 
             // 1. Panggil CCM untuk me-release lock dan ganti status
             _concurrencyControlManager.EndTransaction(transactionId, false);
-
-            _failureRecoveryManager.WriteLog(new()
-            {
-                Operation = ExecutionLog.OperationType.ABORT,
-                TransactionId = transactionId,
-                TableName = "",
-                RowIdentifier = "",
-            });
             
             // 2. Panggil FRM untuk melakukan UNDO Recovery
             bool undoSuccess = _failureRecoveryManager.UndoTransaction(transactionId);
@@ -48,7 +42,7 @@ namespace mDBMS.QueryProcessor.Transaction
                 Message = undoSuccess 
                     ? $"Transaksi {transactionId} telah di-ABORT dan UNDO berhasil." 
                     : $"Transaksi {transactionId} di-ABORT, namun UNDO gagal.",
-                TransactionId = transactionId,
+                TransactionId = -1,
             };
         }
     }

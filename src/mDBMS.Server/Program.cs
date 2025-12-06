@@ -7,41 +7,92 @@ using mDBMS.QueryOptimizer;
 using mDBMS.QueryProcessor;
 using mDBMS.StorageManager;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 
 class Server
 {
     public static void Main(string[] args)
     {
-        short port = 5761;
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
 
-        if (args.Length > 0)
+        short port = 5761;
+        ConcurrencyProtocol ccmProtocol = ConcurrencyProtocol.TwoPhaseLocking;
+
+
+        for (int i = 0; i < args.Length; i++)
         {
-            if (short.TryParse(args[0], out short assignedPort))
+            if (args[i] == "--port" || args[i] == "-p")
             {
-                port = assignedPort;
+                if (i + 1 < args.Length && short.TryParse(args[i + 1], out short assignedPort))
+                {
+                    port = assignedPort;
+                    i++;
+                }
+                else
+                {
+                    Console.Error.WriteLine("Invalid port number!");
+                    Environment.ExitCode = -1;
+                    return;
+                }
             }
-            else
+            else if (args[i] == "--ccm-strategy" || args[i] == "-s")
             {
-                Console.Error.Write("User assigned port number is not valid!");
-                Environment.ExitCode = -1;
-                return;
+                if (i + 1 < args.Length)
+                {
+                    switch (args[i + 1].ToUpper())
+                    {
+                        case "2PL":
+                        case "TWOPHASELOCKING":
+                            ccmProtocol = ConcurrencyProtocol.TwoPhaseLocking;
+                            break;
+                        case "TO":
+                        case "TIMESTAMPORDERING":
+                            ccmProtocol = ConcurrencyProtocol.TimestampOrdering;
+                            break;
+                        case "OCC":
+                        case "OPTIMISTIC":
+                        case "OPTIMISTICVALIDATION":
+                            ccmProtocol = ConcurrencyProtocol.OptimisticValidation;
+                            break;
+                        default:
+                            Console.Error.WriteLine($"Unknown CCM strategy: {args[i + 1]}");
+                            Console.Error.WriteLine("Valid options: 2PL, TO, OCC");
+                            Environment.ExitCode = -1;
+                            return;
+                    }
+                    i++;
+                }
+                else
+                {
+                    Console.Error.WriteLine("CCM strategy not specified!");
+                    Environment.ExitCode = -1;
+                    return;
+                }
+            }
+            else if (short.TryParse(args[i], out short legacyPort))
+            {
+                port = legacyPort;
             }
         }
+
 
         int connectionTimeout = 1000;
         int initialBufferSize = 4096;
 
         var qpProxy = LateProxy<IQueryProcessor>.Create();
+        var bmProxy = LateProxy<IBufferManager>.Create();
 
-        var sm = new StorageEngine();
+        var sm = new StorageEngine(bmProxy);
         var qo = new QueryOptimizerEngine(sm);
-        var ccm = new ConcurrencyControlManager();
+        var ccm = new ConcurrencyControlManager(ccmProtocol);
         var frm = new FailureRecoveryManager(qpProxy, sm);
         var qp = new QueryProcessor(sm, qo, ccm, frm);
 
         ((LateProxy<IQueryProcessor>)qpProxy).SetTarget(qp);
+        ((LateProxy<IBufferManager>)bmProxy).SetTarget(frm);
 
         IPEndPoint endpoint = new(IPAddress.Loopback, port);
 

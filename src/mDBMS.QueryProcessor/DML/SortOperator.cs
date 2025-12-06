@@ -9,70 +9,67 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 
     public IEnumerable<Row> VisitSortNode(SortNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Sort");
+
         if (cachedRows != null) return cachedRows;
 
         Row[] rows = node.Input.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId)).ToArray();
 
         int rowCount = rows.Length;
-        int loopBoundary = rowCount * 2;
+        if (rowCount < 2) return rows;
+        
         Row[] buffer = new Row[rowCount];
 
-        for (int i = 2; i < 2 * loopBoundary; i *= 2)
+        for (int i = 1; i < rowCount; i *= 2)
         {
-            for (int j = 0; j < rowCount; j += i)
+            for (int j = 0; j < rowCount; j += 2 * i)
             {
-                int bufferCap = Math.Min(i, rowCount - j);
-                int halfsize = bufferCap / 2;
-                int bufferSize = 0;
-                int lidx = 0;
-                int ridx = halfsize;
+                int lidx = j;
+                int ridx = Math.Min(j + i, rowCount);
+                int lbound = ridx;
+                int rbound = Math.Min(j + 2 * i, rowCount);
+                int bufferIdx = lidx;
 
-                while (lidx < halfsize && ridx < bufferCap)
+                while (lidx < lbound && ridx < rbound)
                 {
-                    var rowEqual = true;
+                    bool takeLeft = true;
+                    
                     foreach (var ordering in node.OrderBy)
                     {
-                        var lval = (IComparable) rows[j + lidx][ordering.Column];
-                        var rval = (IComparable) rows[j + ridx][ordering.Column];
+                        var lval = (IComparable) rows[lidx][ordering.Column];
+                        var rval = (IComparable) rows[ridx][ordering.Column];
+                        int comparison = lval.CompareTo(rval);
 
-                        if (lval == rval) continue;
-                        rowEqual = false;
+                        if (comparison == 0) continue;
 
-                        var isAscending = ordering.IsAscending;
-
-                        if ((lval.CompareTo(rval) < 0) == isAscending)
-                        {
-                            buffer[bufferSize++] = rows[j + lidx++];
-                        }
-                        else
-                        {
-                            buffer[bufferSize++] = rows[j + ridx++];
-                        }
-
+                        takeLeft = (comparison < 0) == ordering.IsAscending;
                         break;
                     }
-
-                    if (rowEqual)
+                    
+                    if (takeLeft)
                     {
-                        buffer[bufferSize++] = rows[j + lidx++];
-                        buffer[bufferSize++] = rows[j + ridx++];
+                        buffer[bufferIdx++] = rows[lidx++];
+                    }
+                    else
+                    {
+                        buffer[bufferIdx++] = rows[ridx++];
                     }
                 }
 
-                while (lidx < halfsize)
+                while (lidx < lbound)
                 {
-                    buffer[bufferSize++] = rows[j + lidx++];
+                    buffer[bufferIdx++] = rows[lidx++];
                 }
 
-                while (ridx < bufferSize)
+                while (ridx < rbound)
                 {
-                    buffer[bufferSize++] = rows[j + ridx++];
+                    buffer[bufferIdx++] = rows[ridx++];
                 }
+            }
 
-                for (int l = 0; l < bufferSize; l++)
-                {
-                    rows[j + l] = buffer[l];
-                }
+            for(int k = 0; k < rowCount; k++)
+            {
+                rows[k] = buffer[k];
             }
         }
 

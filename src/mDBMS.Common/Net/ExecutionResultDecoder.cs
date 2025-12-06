@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using mDBMS.Common.Transaction;
 
@@ -11,7 +12,7 @@ public class ExecutionResultDecoder
 
         var span = new Span<byte>(data, lowerbound, length);
 
-        ExecutionResultPayload? payload = JsonSerializer.Deserialize<ExecutionResultPayload>(span.ToString()) ?? throw new Exception("could not deserialize execution result payload");
+        ExecutionResultPayload? payload = JsonSerializer.Deserialize<ExecutionResultPayload>(Encoding.UTF8.GetString(span)) ?? throw new Exception("could not deserialize execution result payload");
         return payload.Extract();
     }
 }

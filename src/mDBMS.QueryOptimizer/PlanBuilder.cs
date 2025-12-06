@@ -39,7 +39,16 @@ public class PlanBuilder
     public PlanNode BuildPlan(Query query)
     {
         // Step 1: Buat base scan node (leaf) dan join subtree jika ada JOIN
-        PlanNode root = BuildBaseScan(query.Table, query.WhereClause, query.OrderBy);
+        PlanNode root;
+
+        if (query.FromTables != null && query.FromTables.Count > 1)
+        {
+            root = BuildCartesianProduct(query.FromTables, query.WhereClause);
+        }
+        else
+        {
+            root = BuildBaseScan(query.Table, query.WhereClause, query.OrderBy);
+        }
         root = BuildJoins(root, query);
 
         // Step 2: Apply filter jika ada WHERE clause
@@ -70,6 +79,159 @@ public class PlanBuilder
         CalculateCosts(root);
 
         return root;
+    }
+
+    private PlanNode BuildCartesianProduct(List<string> tables, string? whereClause)
+    {
+        if (tables.Count == 0)
+            throw new InvalidOperationException("No tables specified for Cartesian product");
+
+        if (tables.Count == 1)
+            return BuildBaseScan(tables[0], whereClause, null);
+
+        Console.WriteLine($"[PlanBuilder] Building Cartesian Product for tables: {string.Join(", ", tables)}");
+        Console.WriteLine($"[PlanBuilder] WHERE clause: '{whereClause ?? "(none)"}'");
+
+        PlanNode root = BuildBaseScan(tables[0], null, null);
+
+        var allConditions = string.IsNullOrWhiteSpace(whereClause)
+            ? new List<string>()
+            : SplitConjunctiveConditions(whereClause);
+
+        Console.WriteLine($"[PlanBuilder] Extracted {allConditions.Count} conditions from WHERE");
+
+        for (int i = 1; i < tables.Count; i++)
+        {
+            string rightTable = tables[i];
+
+            PlanNode rightScan = BuildBaseScan(rightTable, null, null);
+
+            var currentTables = tables.Take(i + 1).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var joinConditions = ExtractJoinConditions(allConditions, currentTables);
+
+            Console.WriteLine($"[PlanBuilder] Processing table {i}: {rightTable}");
+            Console.WriteLine($"[PlanBuilder] Found {joinConditions.Count} join conditions");
+
+            if (joinConditions.Any())
+            {
+                var joinCondition = ParseConditions(string.Join(" AND ", joinConditions)).FirstOrDefault();
+
+                if (joinCondition != null && !string.IsNullOrEmpty((string)joinCondition.lhs))
+                {
+                    Console.WriteLine($"[PlanBuilder] Creating INNER JOIN with condition: {joinCondition.lhs} = {joinCondition.rhs}");
+                    root = new JoinNode(root, rightScan, JoinType.INNER, joinCondition)
+                    {
+                        Algorithm = SelectJoinAlgorithmForCartesian(root, rightTable)
+                    };
+
+                    foreach (var cond in joinConditions)
+                    {
+                        allConditions.Remove(cond);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"[PlanBuilder] Creating CROSS JOIN (invalid join condition)");
+                    root = new JoinNode(root, rightScan, JoinType.CROSS, null)
+                    {
+                        Algorithm = JoinAlgorithm.NestedLoop
+                    };
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[PlanBuilder] Creating CROSS JOIN (no join conditions)");
+                root = new JoinNode(root, rightScan, JoinType.CROSS, null)
+                {
+                    Algorithm = JoinAlgorithm.NestedLoop
+                };
+            }
+        }
+
+        return root;
+    }
+
+    private List<string> SplitConjunctiveConditions(string whereClause)
+    {
+        if (string.IsNullOrWhiteSpace(whereClause))
+            return new List<string>();
+
+        var parts = System.Text.RegularExpressions.Regex.Split(
+            whereClause,
+            @"\bAND\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+        );
+
+        return parts.Select(p => p.Trim()).Where(p => !string.IsNullOrEmpty(p)).ToList();
+    }
+
+    private List<string> ExtractJoinConditions(List<string> conditions, HashSet<string> involvedTables)
+    {
+        var joinConditions = new List<string>();
+
+        foreach (var condition in conditions)
+        {
+            var columnsInCondition = ExtractColumnsFromCondition(condition);
+
+            var tablesInCondition = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var column in columnsInCondition)
+            {
+                var (table, _) = SplitColumnReference(column);
+                if (table != null && involvedTables.Contains(table))
+                {
+                    tablesInCondition.Add(table);
+                }
+            }
+
+            if (tablesInCondition.Count >= 2)
+            {
+                joinConditions.Add(condition);
+            }
+        }
+
+        return joinConditions;
+    }
+
+    private IEnumerable<string> ExtractColumnsFromCondition(string condition)
+    {
+        var pattern = @"\b([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\b";
+        var matches = System.Text.RegularExpressions.Regex.Matches(condition, pattern);
+
+        var keywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "AND", "OR", "NOT", "IN", "LIKE", "BETWEEN", "IS", "NULL"
+        };
+
+        foreach (System.Text.RegularExpressions.Match match in matches)
+        {
+            string identifier = match.Value;
+            if (!keywords.Contains(identifier) && !double.TryParse(identifier, out _))
+            {
+                yield return identifier;
+            }
+        }
+    }
+
+    private JoinAlgorithm SelectJoinAlgorithmForCartesian(PlanNode leftNode, string rightTable)
+    {
+        try
+        {
+            var leftTableCand = EnumerateBaseTable(leftNode).FirstOrDefault() ?? "unknown";
+            var leftStats = GetStatsOrDefault(leftTableCand);
+            var rightStats = GetStatsOrDefault(rightTable);
+
+            if (leftStats.TupleCount < 1000 && rightStats.TupleCount < 1000)
+            {
+                return JoinAlgorithm.Hash;
+            }
+
+            return JoinAlgorithm.NestedLoop;
+        }
+        catch
+        {
+            return JoinAlgorithm.NestedLoop;
+        }
     }
 
     /// <summary>
@@ -500,10 +662,25 @@ public class PlanBuilder
                     _ => Condition.Operation.EQ
                 };
 
+                object val = rhs;
+
+                if (int.TryParse(rhs, out int integer))
+                {
+                    val = integer;
+                }
+                else if (float.TryParse(rhs, out float real))
+                {
+                    val = real;
+                }
+                else if (rhs.StartsWith("'") && rhs.EndsWith("'") && rhs != "'")
+                {
+                    val = rhs.Substring(1, rhs.Length - 2);
+                }
+                
                 return new Condition
                 {
                     lhs = lhs,
-                    rhs = rhs,
+                    rhs = val,
                     opr = operation,
                     rel = Condition.Relation.COLUMN_AND_VALUE
                 };

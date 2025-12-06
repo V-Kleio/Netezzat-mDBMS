@@ -42,11 +42,14 @@ namespace mDBMS.FailureRecovery
                 Directory.CreateDirectory(_logDirectory);
             }
 
-            // baca LSN terakhir dari file log jika ada
-            if (File.Exists(_logFilePath))
+            // buat file log jika belum ada
+            if (!File.Exists(_logFilePath))
             {
-                _currentLSN = ReadLastLSN();
+                File.Create(_logFilePath).Close();
             }
+
+            // baca LSN terakhir dari file log jika ada
+            _currentLSN = ReadLastLSN();
         }
 
         // ======================================== MAIN ========================================
@@ -161,13 +164,6 @@ namespace mDBMS.FailureRecovery
             {
                 Console.Error.WriteLine("[ERROR FRM]: Query Processor belum diset. Undo tidak dapat dilakukan.");
                 return false;
-            }
-
-            // No log (nothing to do -> success)
-            if (!File.Exists(_logFilePath))
-            {
-                Console.WriteLine("[FRM UNDO]: File log tidak ditemukan. Tidak ada yang perlu di-undo.");
-                return true;
             }
 
             try
@@ -569,21 +565,21 @@ namespace mDBMS.FailureRecovery
         // Undo INSERT = DELETE by RowIdentifier
         private string GenerateUndoForInsert(LogEntry entry)
         {
-            if (string.IsNullOrEmpty(entry.TableName) || string.IsNullOrEmpty(entry.RowIdentifier))
+            if (string.IsNullOrEmpty(entry.TableName) || entry.AfterImage == null)
             {
-                Console.Error.WriteLine($"[ERROR FRM]: Missing TableName or RowIdentifier untuk undo INSERT");
+                Console.Error.WriteLine($"[ERROR FRM]: Missing TableName or AfterImage untuk undo INSERT");
                 return string.Empty;
             }
 
-            if (!entry.RowIdentifier.Contains('=') && !entry.RowIdentifier.Contains("IN"))
-            {
-                Console.Error.WriteLine($"[ERROR FRM]: Invalid RowIdentifier for UNDO INSERT: '{entry.RowIdentifier}'");
-                return string.Empty;
-            }
+            var whereClause = string.Join(" AND ",
+                entry.AfterImage.Columns.Select(
+                    kv => $"{kv.Key} = {(kv.Value is string ? "'" + EscapeSqlString(kv.Value?.ToString()?? "NULL") + "'" : kv.Value)}"
+                )
+            );
 
             // Assuming RowIdentifier contains primary key information
             // Format: DELETE FROM table WHERE primary_key = value
-            return $"DELETE FROM {entry.TableName} WHERE {entry.RowIdentifier}";
+            return $"DELETE FROM {entry.TableName} WHERE {whereClause}";
         }
 
             /// Undo UPDATE = Restore BeforeImage
@@ -591,7 +587,8 @@ namespace mDBMS.FailureRecovery
         {
             if (entry.TableName == null ||
                 entry.RowIdentifier == null ||
-                entry.BeforeImage == null)
+                entry.BeforeImage == null ||
+                entry.AfterImage == null)
             {
                 Console.Error.WriteLine("[ERROR FRM]: Missing data untuk undo UPDATE");
                 return string.Empty;
@@ -602,11 +599,17 @@ namespace mDBMS.FailureRecovery
                 // BeforeImage sudah Row, jadi akses langsung:
                 var setClause = string.Join(", ",
                     entry.BeforeImage.Columns.Select(
-                        kv => $"{kv.Key} = '{EscapeSqlString(kv.Value?.ToString() ?? "NULL")}'"
+                        kv => $"{kv.Key} = {(kv.Value is string ? "'" + EscapeSqlString(kv.Value?.ToString()?? "NULL") + "'" : kv.Value)}"
                     )
                 );
 
-                return $"UPDATE {entry.TableName} SET {setClause} WHERE {entry.RowIdentifier}";
+                var whereClause = string.Join(" AND ",
+                    entry.AfterImage.Columns.Select(
+                        kv => $"{kv.Key} = {(kv.Value is string ? "'" + EscapeSqlString(kv.Value?.ToString()?? "NULL") + "'" : kv.Value)}"
+                    )
+                );
+
+                return $"UPDATE {entry.TableName} SET {setClause} WHERE {whereClause}";
             }
             catch (Exception ex)
             {
@@ -700,6 +703,8 @@ namespace mDBMS.FailureRecovery
                 Console.Error.WriteLine($"[ERROR FRM]: Gagal membaca file log - {ex.Message}");
                 throw;
             }
+
+            entries.AddRange(_logBuffer);
 
             return entries;
         }
@@ -827,37 +832,6 @@ namespace mDBMS.FailureRecovery
                 FlushPageToDisk(page);
             }
             return buffers;
-        }
-
-         private LogOperationType ParseOperationType(string operation)
-        {
-            if (string.IsNullOrWhiteSpace(operation))
-            {
-                throw new ArgumentException("Operation type cannot be null or empty", nameof(operation));
-            }
-
-            return operation.ToUpperInvariant() switch
-            {
-                "INSERT" => LogOperationType.INSERT,
-                "UPDATE" => LogOperationType.UPDATE,
-                "DELETE" => LogOperationType.DELETE,
-                "BEGIN" => LogOperationType.BEGIN_TRANSACTION,
-                "COMMIT" => LogOperationType.COMMIT,
-                "ROLLBACK" => LogOperationType.ABORT,
-                "ABORT" => LogOperationType.ABORT,
-
-                // Alias/alternatif
-                "BEGIN TRANSACTION" => LogOperationType.BEGIN_TRANSACTION,
-                "COMMIT TRANSACTION" => LogOperationType.COMMIT,
-                "ROLLBACK TRANSACTION" => LogOperationType.ABORT,
-
-                // Checkpoint
-                "CHECKPOINT" => LogOperationType.CHECKPOINT,
-                "END CHECKPOINT" => LogOperationType.END_CHECKPOINT,
-                "END_CHECKPOINT" => LogOperationType.END_CHECKPOINT,
-
-                _ => throw new ArgumentException($"Unknown operation type: {operation}", nameof(operation))
-            };
         }
     }
 }

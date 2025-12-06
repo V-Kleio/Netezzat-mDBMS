@@ -16,6 +16,8 @@ namespace mDBMS.QueryProcessor.Transaction
 
         public ExecutionResult HandleQuery(string query, int transactionId)
         {
+            Console.WriteLine($"[INFO] Operasi Begin diterima");
+
             if (transactionId != -1)
             {
                 return new ExecutionResult()
@@ -28,13 +30,6 @@ namespace mDBMS.QueryProcessor.Transaction
             }
 
             transactionId = _concurrencyControlManager.BeginTransaction();
-            _failureRecoveryManager.WriteLog(new()
-            {
-                Operation = ExecutionLog.OperationType.BEGIN,
-                TransactionId = transactionId,
-                TableName = "",
-                RowIdentifier = "",
-            });
 
             return new ExecutionResult()
             {

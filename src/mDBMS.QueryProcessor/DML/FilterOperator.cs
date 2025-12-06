@@ -7,6 +7,13 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
     public IEnumerable<Row> VisitFilterNode(FilterNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Filter");
+
+        foreach (var cond in node.Conditions)
+        {
+            Console.WriteLine($"       {cond.lhs} = {cond.rhs}");
+        }
+
         foreach (Row row in node.Input.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId)))
         {
             bool matches = true;

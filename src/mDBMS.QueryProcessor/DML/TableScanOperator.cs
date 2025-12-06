@@ -7,6 +7,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
     public IEnumerable<Row> VisitTableScanNode(TableScanNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Table Scan untuk tabel {node.TableName}");
+
         foreach (Row row in storageManager.ReadBlock(new(node.TableName, [])))
         {
             Row canonRow = new() { id = row.id };

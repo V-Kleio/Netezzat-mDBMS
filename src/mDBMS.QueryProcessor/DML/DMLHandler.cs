@@ -19,18 +19,13 @@ namespace mDBMS.QueryProcessor.DML
 
         public ExecutionResult HandleQuery(string query, int transactionId)
         {
+            Console.WriteLine($"[INFO] Operasi DML diterima");
+
             bool temporaryTransaction = transactionId == -1;
 
             if (temporaryTransaction)
             {
                 transactionId = _concurrencyControlManager.BeginTransaction();
-                _failureRecoveryManager.WriteLog(new()
-                {
-                    Operation = ExecutionLog.OperationType.BEGIN,
-                    TransactionId = transactionId,
-                    TableName = "",
-                    RowIdentifier = "",
-                });
             }
 
             string upper = query.Split()[0].Trim().ToUpperInvariant();
@@ -46,13 +41,6 @@ namespace mDBMS.QueryProcessor.DML
             if (temporaryTransaction && result.TransactionId != -1)
             {
                 _concurrencyControlManager.CommitTransaction(transactionId);
-                _failureRecoveryManager.WriteLog(new()
-                {
-                    Operation = ExecutionLog.OperationType.COMMIT,
-                    TransactionId = transactionId,
-                    TableName = "",
-                    RowIdentifier = "",
-                });
 
                 result.TransactionId = -1;
             }
@@ -113,14 +101,6 @@ namespace mDBMS.QueryProcessor.DML
                 if (transactionId != -1)
                 {
                     _concurrencyControlManager.AbortTransaction(transactionId);
-                    _failureRecoveryManager.WriteLog(new()
-                    {
-                        Operation = ExecutionLog.OperationType.ABORT,
-                        TransactionId = transactionId,
-                        TableName = "",
-                        RowIdentifier = "",
-                    });
-
                     _failureRecoveryManager.UndoTransaction(transactionId);
                 }
 
@@ -133,6 +113,9 @@ namespace mDBMS.QueryProcessor.DML
                     TransactionId = -1,
                 };
             }
+
+            if (returnData)
+                Console.WriteLine($"[INFO] Got {resultData.Count} rows");
 
             return new ExecutionResult()
             {

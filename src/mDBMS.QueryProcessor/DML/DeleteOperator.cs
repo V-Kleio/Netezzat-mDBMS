@@ -8,6 +8,8 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
 {
     public IEnumerable<Row> VisitDeleteNode(DeleteNode node)
     {
+        Console.WriteLine($"[INFO] Melakukan Delete pada tabel {node.TableName}");
+
         foreach (Row row in node.Input.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId)))
         {
             foreach (string rowId in row.id.Split(';'))
@@ -31,10 +33,13 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
             int index = 0;
             foreach (var (key, val) in row.Columns)
             {
-                conditions[index].rel = Condition.Relation.COLUMN_AND_VALUE;
-                conditions[index].opr = Condition.Operation.EQ;
-                conditions[index].lhs = key;
-                conditions[index].rhs = val;
+                conditions[index] = new()
+                {
+                    rel = Condition.Relation.COLUMN_AND_VALUE,
+                    opr = Condition.Operation.EQ,
+                    lhs = key,
+                    rhs = val
+                };
 
                 if (key.StartsWith($"{node.TableName}."))
                 {

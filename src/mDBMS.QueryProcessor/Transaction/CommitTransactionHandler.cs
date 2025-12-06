@@ -16,6 +16,8 @@ namespace mDBMS.QueryProcessor.Transaction
 
         public ExecutionResult HandleQuery(string query, int transactionId)
         {
+            Console.WriteLine($"[INFO] Operasi Commit diterima");
+
             if (transactionId == -1) 
             {
                 return new ExecutionResult()
@@ -29,20 +31,13 @@ namespace mDBMS.QueryProcessor.Transaction
 
             // 1. Panggil CCM untuk me-release lock dan ganti status
             _concurrencyControlManager.EndTransaction(transactionId, true);
-            _failureRecoveryManager.WriteLog(new()
-            {
-                Operation = ExecutionLog.OperationType.COMMIT,
-                TransactionId = transactionId,
-                TableName = "",
-                RowIdentifier = "",
-            });
 
             return new ExecutionResult()
             {
                 Query = query,
                 Success = true,
                 Message = $"Transaksi {transactionId} berhasil di-COMMIT.",
-                TransactionId = transactionId
+                TransactionId = -1
             };
         }
     }

@@ -2,6 +2,7 @@ using mDBMS.Common.Interfaces;
 using mDBMS.Common.QueryData;
 using mDBMS.Common.Data;
 using mDBMS.QueryOptimizer;
+using mDBMS.StorageManager;
 
 namespace mDBMS.QueryOptimizerDriver;
 
@@ -19,24 +20,30 @@ class Program
     {
         Console.WriteLine("=== mDBMS Query Optimizer Driver ===\n");
 
-        // Setup mock storage manager
-        var storageManager = new MockStorageManager();
+        // Setup real storage engine (tanpa buffer manager untuk testing)
+        var storageEngine = new StorageEngine(null);
+        
+        // Wrap dengan StorageManagerWrapper untuk statistik aktual
+        var storageManager = new StorageManagerWrapper(storageEngine);
         
         // Buat optimizer engine
         var optimizer = new QueryOptimizerEngine(storageManager);
 
         // Test cases
-        RunTestCase(optimizer, "Simple SELECT *",
-            "SELECT * FROM employees");
+        // Test dengan tabel aktual dari data/ folder
+        RunTestCase(optimizer, "Simple SELECT * dari students",
+            "SELECT * FROM students");
 
-        RunTestCase(optimizer, "SELECT dengan WHERE",
-            "SELECT id, name, salary FROM employees WHERE salary > 50000");
+        RunTestCase(optimizer, "SELECT dengan WHERE pada students",
+            "SELECT id, name FROM students WHERE id > 5");
 
-        RunTestCase(optimizer, "SELECT dengan ORDER BY",
-            "SELECT name, age FROM employees ORDER BY age DESC");
+        RunTestCase(optimizer, "SELECT dengan ORDER BY pada courses",
+            "SELECT name, credits FROM courses ORDER BY credits DESC");
 
-        RunTestCase(optimizer, "Complex query dengan WHERE dan ORDER BY",
-            "SELECT id, name, dept FROM employees WHERE age > 25 ORDER BY name ASC");
+        RunTestCase(optimizer, "Complex query pada enrollments",
+            "SELECT student_id, course_id FROM enrollments WHERE grade > 70 ORDER BY grade ASC");
+        RunTestCase(optimizer, "JOIN antara students dan enrollments",
+            "SELECT students.name, enrollments.course_id FROM students INNER JOIN enrollments ON students.id = enrollments.student_id WHERE enrollments.grade >= 80 ORDER BY students.name ASC");
 
         // Run edge case tests
         Console.WriteLine("\n\n");
@@ -55,7 +62,7 @@ class Program
         {
             // Step 1: Parse query
             var query = optimizer.ParseQuery(sql);
-            Console.WriteLine($"✓ Parsed successfully");
+            Console.WriteLine($"Parsed successfully");
             Console.WriteLine($"  Table: {query.Table}");
             Console.WriteLine($"  Columns: {string.Join(", ", query.SelectedColumns)}");
             if (!string.IsNullOrWhiteSpace(query.WhereClause))
@@ -65,12 +72,12 @@ class Program
 
             // Step 2: Optimize query (get QueryPlan with embedded tree)
             var queryPlan = optimizer.OptimizeQuery(query);
-            Console.WriteLine($"\n✓ Optimized successfully");
+            Console.WriteLine($"\nOptimized successfully");
             
             // Step 3: Verify PlanTree is embedded
             if (queryPlan.PlanTree != null)
             {
-                Console.WriteLine("✓ QueryPlan contains PlanTree");
+                Console.WriteLine("QueryPlan contains PlanTree");
             }
             
             // Step 4: Print plan tree
@@ -81,15 +88,6 @@ class Program
             Console.WriteLine($"\nEstimated Rows: {queryPlan.PlanTree!.EstimatedRows:F0}");
             Console.WriteLine($"Total Cost: {queryPlan.PlanTree.TotalCost:F2}");
 
-            // Step 6: Test flat steps (backward compatibility)
-            Console.WriteLine($"\nBackward Compatibility (Flat Steps):");
-            Console.WriteLine($"  QueryPlan Steps Count: {queryPlan.Steps.Count}");
-            Console.WriteLine($"  QueryPlan Total Cost: {queryPlan.TotalEstimatedCost:F2}");
-            Console.WriteLine($"  Steps:");
-            foreach (var step in queryPlan.Steps)
-            {
-                Console.WriteLine($"    {step.Order}. {step.Operation} - {step.Description}");
-            }
         }
         catch (Exception ex)
         {
@@ -128,59 +126,118 @@ class Program
 }
 
 /// <summary>
-/// Mock Storage Manager untuk testing tanpa database nyata.
+/// Wrapper untuk StorageEngine yang menyediakan statistik aktual dari file .dat
 /// </summary>
-class MockStorageManager : IStorageManager
+class StorageManagerWrapper : IStorageManager
 {
-    // Daftar tabel yang valid/dikenali
-    private static readonly HashSet<string> _validTables = new(StringComparer.OrdinalIgnoreCase)
+    private readonly StorageEngine _storageEngine;
+    private static readonly string DataPath = GetDataPath();
+    private const int BlockSize = 4096;
+    private const int FileHeaderSize = 4096;
+
+    public StorageManagerWrapper(StorageEngine storageEngine)
     {
-        "employees",
-        "departments", 
-        "locations"
-    };
+        _storageEngine = storageEngine;
+    }
+
+    private static string GetDataPath()
+    {
+        string currentDir = Directory.GetCurrentDirectory();
+        DirectoryInfo? dir = new DirectoryInfo(currentDir);
+
+        while (dir != null)
+        {
+            if (dir.GetFiles("*.sln").Length > 0)
+            {
+                return Path.Combine(dir.FullName, "data");
+            }
+            dir = dir.Parent;
+        }
+
+        string? customPath = Environment.GetEnvironmentVariable("MDBMS_DATA_PATH");
+        if (!string.IsNullOrEmpty(customPath))
+        {
+            return customPath;
+        }
+
+        return Path.Combine(currentDir, "data");
+    }
 
     public Statistic GetStats(string tableName)
     {
-        // Validasi tabel exist
-        if (!_validTables.Contains(tableName))
+        string fileName = $"{tableName.ToLower()}.dat";
+        string fullPath = Path.Combine(DataPath, fileName);
+
+        if (!File.Exists(fullPath))
         {
-            throw new InvalidOperationException($"Table '{tableName}' does not exist");
+            throw new InvalidOperationException($"Table '{tableName}' does not exist at {fullPath}");
         }
 
-        // Return mock statistics untuk table "employees"
-        if (tableName.Equals("employees", StringComparison.OrdinalIgnoreCase))
+        // Baca statistik aktual dari file
+        var schema = SchemaSerializer.ReadSchema(fullPath);
+        var fileInfo = new FileInfo(fullPath);
+        
+        // Hitung jumlah block
+        int blockCount = (int)((fileInfo.Length - FileHeaderSize) / BlockSize);
+        if (blockCount < 0) blockCount = 0;
+
+        // Hitung estimasi tuple count dengan membaca beberapa block
+        int tupleCount = 0;
+        int sampleBlockCount = Math.Min(blockCount, 5); // Sample max 5 block
+        
+        if (sampleBlockCount > 0)
         {
-            return new Statistic
+            using var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read);
+            int totalRowsInSample = 0;
+            
+            for (int i = 0; i < sampleBlockCount; i++)
             {
-                TupleCount = 10000,
-                BlockCount = 100,
-                BlockingFactor = 100,
-                DistinctValues = 1000,
-                Indices = new List<(string, IndexType)>
+                byte[] blockData = new byte[BlockSize];
+                fs.Seek(FileHeaderSize + (i * BlockSize), SeekOrigin.Begin);
+                int bytesRead = fs.Read(blockData, 0, BlockSize);
+                
+                if (bytesRead == BlockSize)
                 {
-                    ("id", IndexType.BTree),
-                    ("age", IndexType.BTree)
+                    var rows = BlockSerializer.DeserializeBlock(schema, blockData);
+                    totalRowsInSample += rows.Count;
                 }
-            };
+            }
+            
+            // Estimasi total tuple berdasarkan sample
+            int avgRowsPerBlock = sampleBlockCount > 0 ? totalRowsInSample / sampleBlockCount : 0;
+            tupleCount = avgRowsPerBlock * blockCount;
+            if (tupleCount == 0 && totalRowsInSample > 0) tupleCount = totalRowsInSample;
         }
 
-        // Default stats untuk tabel valid lainnya
+        // Hitung ukuran tuple berdasarkan schema
+        int tupleSize = 0;
+        foreach (var col in schema.Columns)
+        {
+            tupleSize += col.Length > 0 ? col.Length : 4; // Default 4 bytes jika tidak ada length
+        }
+
+        // Blocking factor
+        int blockingFactor = tupleSize > 0 ? BlockSize / tupleSize : 1;
+
+        Console.WriteLine($"  [Stats] Table: {tableName}, Blocks: {blockCount}, EstTuples: {tupleCount}, TupleSize: {tupleSize}B");
+
         return new Statistic
         {
-            TupleCount = 1000,
-            BlockCount = 10,
-            BlockingFactor = 100,
-            DistinctValues = 100,
+            Table = tableName,
+            TupleCount = tupleCount,
+            BlockCount = blockCount,
+            TupleSize = tupleSize,
+            BlockingFactor = blockingFactor,
+            DistinctValues = Math.Max(1, tupleCount / 10), // Estimasi kasar
             Indices = new List<(string, IndexType)>()
         };
     }
 
-    // Implement required IStorageManager interface methods (not used in this driver, just stubs)
-    public IEnumerable<Row> ReadBlock(DataRetrieval data_retrieval) => Enumerable.Empty<Row>();
-    public int WriteBlock(DataWrite data_write) => 0;
-    public int AddBlock(DataWrite data_write) => 0;
-    public int DeleteBlock(DataDeletion data_deletion) => 0;
-    public int WriteDisk(Page page) => 1;
-    public void SetIndex(string table, string column, IndexType type) { }
+    // Dihandle oleh StorageEngine
+    public IEnumerable<Row> ReadBlock(DataRetrieval data_retrieval) => _storageEngine.ReadBlock(data_retrieval);
+    public int WriteBlock(DataWrite data_write) => _storageEngine.WriteBlock(data_write);
+    public int AddBlock(DataWrite data_write) => _storageEngine.AddBlock(data_write);
+    public int DeleteBlock(DataDeletion data_deletion) => _storageEngine.DeleteBlock(data_deletion);
+    public int WriteDisk(Page page) => _storageEngine.WriteDisk(page);
+    public void SetIndex(string table, string column, IndexType type) => _storageEngine.SetIndex(table, column, type);
 }
