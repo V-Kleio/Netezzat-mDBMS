@@ -10,6 +10,11 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
     {
         Console.WriteLine($"[INFO] Melakukan Nested Loop Join antara 2 tabel");
 
+        if (node.JoinCondition == null)
+        {
+            throw new Exception("NestedLoopJoin requires a join condition. Use CrossJoin for Cartesian product.");
+        }
+
         IEnumerable<Row> lhs = node.Left.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId));
         IEnumerable<Row> rhs = node.Right.AcceptVisitor(new Operator(storageManager, failureRecoveryManager, concurrencyControlManager, transactionId));
 

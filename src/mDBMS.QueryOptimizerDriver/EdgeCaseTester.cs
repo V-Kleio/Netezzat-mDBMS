@@ -141,26 +141,26 @@ public static class EdgeCaseTester
     private static void TestSelectAll(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "SELECT * (all columns)",
-            "SELECT * FROM employees");
+            "SELECT * FROM students");
     }
 
     private static void TestSelectSpecificColumns(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "SELECT specific columns",
-            "SELECT id, name, salary FROM employees");
+            "SELECT StudentID, FullName, GPA FROM students");
     }
 
     private static void TestSelectSingleColumn(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "SELECT single column",
-            "SELECT name FROM employees");
+            "SELECT FullName FROM students");
     }
 
     private static void TestSelectWithAlias(QueryOptimizerEngine optimizer)
     {
         // Table-qualified column references work
         RunTest(optimizer, "SELECT with table reference",
-            "SELECT employees.id, employees.name FROM employees");
+            "SELECT students.StudentID, students.FullName FROM students");
     }
 
     #endregion
@@ -170,49 +170,49 @@ public static class EdgeCaseTester
     private static void TestWhereEquality(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "WHERE with = operator",
-            "SELECT * FROM employees WHERE id = 100");
+            "SELECT * FROM students WHERE StudentID = 100");
     }
 
     private static void TestWhereGreaterThan(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "WHERE with > operator",
-            "SELECT * FROM employees WHERE salary > 50000");
+            "SELECT * FROM students WHERE GPA > 50000");
     }
 
     private static void TestWhereLessThan(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "WHERE with < operator",
-            "SELECT * FROM employees WHERE age < 30");
+            "SELECT * FROM students WHERE GPA < 30");
     }
 
     private static void TestWhereGreaterOrEqual(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "WHERE with >= operator",
-            "SELECT * FROM employees WHERE salary >= 60000");
+            "SELECT * FROM students WHERE GPA >= 60000");
     }
 
     private static void TestWhereLessOrEqual(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "WHERE with <= operator",
-            "SELECT * FROM employees WHERE age <= 25");
+            "SELECT * FROM students WHERE GPA <= 25");
     }
 
     private static void TestWhereNotEqual(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "WHERE with <> operator",
-            "SELECT * FROM employees WHERE status <> 'inactive'");
+            "SELECT * FROM students WHERE Email <> 'inactive'");
     }
 
     private static void TestWhereWithStringLiteral(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "WHERE with string literal",
-            "SELECT * FROM employees WHERE name = 'John'");
+            "SELECT * FROM students WHERE FullName = 'John'");
     }
 
     private static void TestWhereWithNumericValue(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "WHERE with numeric value",
-            "SELECT * FROM employees WHERE department_id = 5");
+            "SELECT * FROM students WHERE department_id = 5");
     }
 
     #endregion
@@ -222,25 +222,25 @@ public static class EdgeCaseTester
     private static void TestOrderByAsc(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "ORDER BY ASC",
-            "SELECT * FROM employees ORDER BY name ASC");
+            "SELECT * FROM students ORDER BY FullName ASC");
     }
 
     private static void TestOrderByDesc(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "ORDER BY DESC",
-            "SELECT * FROM employees ORDER BY salary DESC");
+            "SELECT * FROM students ORDER BY GPA DESC");
     }
 
     private static void TestOrderByMultipleColumns(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "ORDER BY multiple columns",
-            "SELECT * FROM employees ORDER BY department ASC, salary DESC");
+            "SELECT * FROM students ORDER BY DepartmentID ASC, GPA DESC");
     }
 
     private static void TestOrderByWithWhere(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "WHERE + ORDER BY combination",
-            "SELECT * FROM employees WHERE age > 25 ORDER BY salary DESC");
+            "SELECT * FROM students WHERE GPA > 25 ORDER BY GPA DESC");
     }
 
     #endregion
@@ -250,31 +250,31 @@ public static class EdgeCaseTester
     private static void TestInnerJoin(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "INNER JOIN",
-            "SELECT * FROM employees INNER JOIN departments ON employees.dept_id = departments.id");
+            "SELECT * FROM students INNER JOIN departments ON students.DepartmentID = departments.DepartmentID");
     }
 
     private static void TestLeftJoin(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "LEFT JOIN",
-            "SELECT * FROM employees LEFT JOIN departments ON employees.dept_id = departments.id");
+            "SELECT * FROM students LEFT JOIN departments ON students.DepartmentID = departments.DepartmentID");
     }
 
     private static void TestJoinWithWhere(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "JOIN with WHERE",
-            "SELECT * FROM employees INNER JOIN departments ON employees.dept_id = departments.id WHERE salary > 50000");
+            "SELECT * FROM students INNER JOIN departments ON students.DepartmentID = departments.DepartmentID WHERE GPA > 50000");
     }
 
     private static void TestJoinWithOrderBy(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "JOIN with ORDER BY",
-            "SELECT * FROM employees INNER JOIN departments ON employees.dept_id = departments.id ORDER BY name ASC");
+            "SELECT * FROM students INNER JOIN departments ON students.DepartmentID = departments.DepartmentID ORDER BY FullName ASC");
     }
 
     private static void TestMultipleJoins(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "Multiple JOINs",
-            "SELECT * FROM employees INNER JOIN departments ON employees.dept_id = departments.id INNER JOIN locations ON departments.loc_id = locations.id");
+            "SELECT * FROM students INNER JOIN departments ON students.DepartmentID = departments.DepartmentID INNER JOIN courses ON departments.DepartmentID = courses.CourseID");
     }
 
     #endregion
@@ -285,19 +285,19 @@ public static class EdgeCaseTester
     {
         // COUNT(*) is not supported by parser - aggregate functions need implementation
         RunTest(optimizer, "GROUP BY single column",
-            "SELECT department, COUNT(*) FROM employees GROUP BY department", expectFailure: true);
+            "SELECT DepartmentID, COUNT(*) FROM students GROUP BY DepartmentID", expectFailure: true);
     }
 
     private static void TestGroupByMultiple(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "GROUP BY multiple columns",
-            "SELECT department, status, COUNT(*) FROM employees GROUP BY department, status", expectFailure: true);
+            "SELECT DepartmentID, Email, COUNT(*) FROM students GROUP BY DepartmentID, Email", expectFailure: true);
     }
 
     private static void TestGroupByWithWhere(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "GROUP BY with WHERE",
-            "SELECT department, COUNT(*) FROM employees WHERE salary > 50000 GROUP BY department", expectFailure: true);
+            "SELECT DepartmentID, COUNT(*) FROM students WHERE GPA > 50000 GROUP BY DepartmentID", expectFailure: true);
     }
 
     #endregion
@@ -307,13 +307,13 @@ public static class EdgeCaseTester
     private static void TestComplexWhereOrderBy(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "Complex WHERE + ORDER BY",
-            "SELECT id, name, salary FROM employees WHERE age > 25 ORDER BY salary DESC");
+            "SELECT StudentID, FullName, GPA FROM students WHERE GPA > 25 ORDER BY GPA DESC");
     }
 
     private static void TestSelectWithAllClauses(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "SELECT with multiple clauses",
-            "SELECT id, name FROM employees WHERE age > 21 ORDER BY name ASC");
+            "SELECT StudentID, FullName FROM students WHERE GPA > 21 ORDER BY FullName ASC");
     }
 
     #endregion
@@ -323,19 +323,19 @@ public static class EdgeCaseTester
     private static void TestInsertSingleRow(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "INSERT single row",
-            "INSERT INTO employees VALUES (1, 'John', 50000)");
+            "INSERT INTO students VALUES (1, 'John Doe', 'john@test.com', 20, 3.5, 1)");
     }
 
     private static void TestInsertMultipleValues(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "INSERT with column list",
-            "INSERT INTO employees (id, name, salary) VALUES (2, 'Jane', 60000)");
+            "INSERT INTO students (StudentID, FullName, Email, Age, GPA, DepartmentID) VALUES (2, 'Jane Doe', 'jane@test.com', 21, 3.8, 2)");
     }
 
     private static void TestInsertWithColumns(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "INSERT partial columns",
-            "INSERT INTO employees (name, salary) VALUES ('Bob', 45000)");
+            "INSERT INTO students (FullName, GPA) VALUES ('Bob Smith', 3.2)");
     }
 
     #endregion
@@ -345,19 +345,19 @@ public static class EdgeCaseTester
     private static void TestUpdateSingle(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "UPDATE single column",
-            "UPDATE employees SET salary = 55000");
+            "UPDATE students SET GPA = 3.9");
     }
 
     private static void TestUpdateWithWhere(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "UPDATE with WHERE",
-            "UPDATE employees SET salary = 60000 WHERE id = 1");
+            "UPDATE students SET GPA = 4.0 WHERE StudentID = 1");
     }
 
     private static void TestUpdateMultipleColumns(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "UPDATE multiple columns",
-            "UPDATE employees SET salary = 65000, status = 'senior' WHERE age > 40");
+            "UPDATE students SET GPA = 3.5, Email = 'updated@test.com' WHERE Age > 22");
     }
 
     #endregion
@@ -367,13 +367,13 @@ public static class EdgeCaseTester
     private static void TestDeleteAll(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "DELETE all rows",
-            "DELETE FROM employees");
+            "DELETE FROM students");
     }
 
     private static void TestDeleteWithWhere(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "DELETE with WHERE",
-            "DELETE FROM employees WHERE status = 'inactive'");
+            "DELETE FROM students WHERE Email = 'inactive'");
     }
 
     #endregion
@@ -390,22 +390,22 @@ public static class EdgeCaseTester
     private static void TestInvalidTableName(QueryOptimizerEngine optimizer)
     {
         // Tabel dengan typo tidak ada di MockStorageManager - harus gagal
-        RunTest(optimizer, "Typo in table name",
-            "SELECT * FROM employeess", expectFailure: true);  // double 's' typo
+        RunTest(optimizer, "Typo in table FullName",
+            "SELECT * FROM studentss", expectFailure: true);  // double 's' typo
     }
 
     private static void TestTableNameWithSpecialChars(QueryOptimizerEngine optimizer)
     {
-        // Parser is lenient - @ stops identifier parsing, 'emp' becomes table name
+        // Parser is lenient - @ stops identifier parsing, 'emp' becomes table FullName
         // 'emp' doesn't exist in MockStorageManager - should fail
-        RunTest(optimizer, "Table name with special characters",
+        RunTest(optimizer, "Table FullName with special characters",
             "SELECT * FROM emp@loyees", expectFailure: true);
     }
 
     private static void TestTableNameStartsWithNumber(QueryOptimizerEngine optimizer)
     {
         // Nama tabel dimulai dengan angka (invalid identifier)
-        RunTest(optimizer, "Table name starts with number",
+        RunTest(optimizer, "Table FullName starts with number",
             "SELECT * FROM 123employees", expectFailure: true);
     }
 
@@ -413,7 +413,7 @@ public static class EdgeCaseTester
     {
         // Parser treats '' as a string literal (empty string)
         // Empty string table doesn't exist - should fail
-        RunTest(optimizer, "Empty table name (string literal)",
+        RunTest(optimizer, "Empty table FullName (string literal)",
             "SELECT * FROM ''", expectFailure: true);
     }
 
@@ -421,60 +421,60 @@ public static class EdgeCaseTester
     {
         // JOIN dengan tabel yang tidak ada - harus gagal
         RunTest(optimizer, "JOIN with nonexistent table",
-            "SELECT * FROM employees INNER JOIN nonexistent_dept ON employees.dept_id = nonexistent_dept.id", expectFailure: true);
+            "SELECT * FROM students INNER JOIN nonexistent_dept ON students.DepartmentID = nonexistent_dept.StudentID", expectFailure: true);
     }
 
     private static void TestUpdateInvalidTable(QueryOptimizerEngine optimizer)
     {
         // UPDATE pada tabel yang tidak ada - harus gagal
         RunTest(optimizer, "UPDATE nonexistent table",
-            "UPDATE nonexistent_table SET salary = 50000 WHERE id = 1", expectFailure: true);
+            "UPDATE nonexistent_table SET GPA = 50000 WHERE StudentID = 1", expectFailure: true);
     }
 
     private static void TestDeleteInvalidTable(QueryOptimizerEngine optimizer)
     {
         // DELETE dari tabel yang tidak ada - harus gagal
         RunTest(optimizer, "DELETE from nonexistent table",
-            "DELETE FROM nonexistent_table WHERE id = 1", expectFailure: true);
+            "DELETE FROM nonexistent_table WHERE StudentID = 1", expectFailure: true);
     }
 
     private static void TestLongColumnNames(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "Long column names",
-            "SELECT very_long_column_name_that_might_cause_issues FROM employees");
+            "SELECT very_long_column_name_that_might_cause_issues FROM students");
     }
 
     private static void TestNumericColumnNames(QueryOptimizerEngine optimizer)
     {
         // Column names with numeric suffix are valid identifiers (col1, col2)
         RunTest(optimizer, "Column names with numeric suffix",
-            "SELECT col1, col2, col3 FROM employees");
+            "SELECT col1, col2, col3 FROM students");
     }
 
     private static void TestColumnStartsWithNumber(QueryOptimizerEngine optimizer)
     {
         // Column names starting with numbers should fail (invalid identifier)
-        RunTest(optimizer, "Column name starts with number",
-            "SELECT 1column FROM employees", expectFailure: true);
+        RunTest(optimizer, "Column FullName starts with number",
+            "SELECT 1column FROM students", expectFailure: true);
     }
 
     private static void TestCaseSensitivity(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "Mixed case keywords",
-            "SeLeCt * FrOm employees WhErE id = 1");
+            "SeLeCt * FROM students WhErE StudentID = 1");
     }
 
     private static void TestWhitespaceHandling(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "Extra whitespace",
-            "SELECT    *    FROM    employees    WHERE    id   =   1");
+            "SELECT    *    FROM    students    WHERE    StudentID   =   1");
     }
 
     private static void TestSpecialCharactersInStrings(QueryOptimizerEngine optimizer)
     {
         // SQL standard: escaped single quote is '' (two single quotes)
         RunTest(optimizer, "Special characters in strings",
-            "SELECT * FROM employees WHERE name = 'O''Brien'");
+            "SELECT * FROM students WHERE FullName = 'O''Brien'");
     }
 
     #endregion
@@ -489,7 +489,7 @@ public static class EdgeCaseTester
 
     private static void TestMissingTableName(QueryOptimizerEngine optimizer)
     {
-        RunTest(optimizer, "Missing table name",
+        RunTest(optimizer, "Missing table FullName",
             "SELECT * FROM", expectFailure: true);
     }
 
@@ -498,7 +498,7 @@ public static class EdgeCaseTester
         // Parser is lenient - unknown tokens like !! are skipped
         // This results in WHERE clause parsing the remaining valid parts
         RunTest(optimizer, "Invalid operator (!! skipped by parser)",
-            "SELECT * FROM employees WHERE id !! 5");
+            "SELECT * FROM students WHERE StudentID !! 5");
     }
 
     #endregion
@@ -509,20 +509,20 @@ public static class EdgeCaseTester
     {
         // Missing SET clause should fail
         RunTest(optimizer, "UPDATE without SET",
-            "UPDATE employees WHERE id = 1", expectFailure: true);
+            "UPDATE students WHERE StudentID = 1", expectFailure: true);
     }
 
     private static void TestDeleteWithComplexWhere(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "DELETE with complex WHERE",
-            "DELETE FROM employees WHERE status = 'inactive' AND age > 65");
+            "DELETE FROM students WHERE Email = 'inactive' AND GPA > 65");
     }
 
     private static void TestInsertEmptyValues(QueryOptimizerEngine optimizer)
     {
         // Empty VALUES should fail
         RunTest(optimizer, "INSERT with empty VALUES",
-            "INSERT INTO employees VALUES ()", expectFailure: true);
+            "INSERT INTO students VALUES ()", expectFailure: true);
     }
 
     #endregion
@@ -533,19 +533,19 @@ public static class EdgeCaseTester
     {
         // Self-join without alias (parser may not support alias syntax)
         RunTest(optimizer, "Self JOIN (same table)",
-            "SELECT * FROM employees INNER JOIN employees ON employees.manager_id = employees.id");
+            "SELECT * FROM students INNER JOIN students ON students.DepartmentID = students.StudentID");
     }
 
     private static void TestJoinMultipleConditions(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "JOIN with multiple ON conditions",
-            "SELECT * FROM employees INNER JOIN departments ON employees.dept_id = departments.id AND employees.loc_id = departments.loc_id");
+            "SELECT * FROM students INNER JOIN departments ON students.DepartmentID = departments.DepartmentID AND students.StudentID = departments.DepartmentID");
     }
 
     private static void TestRightJoin(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "RIGHT JOIN",
-            "SELECT * FROM employees RIGHT JOIN departments ON employees.dept_id = departments.id");
+            "SELECT * FROM students RIGHT JOIN departments ON students.DepartmentID = departments.DepartmentID");
     }
 
     #endregion
@@ -555,26 +555,26 @@ public static class EdgeCaseTester
     private static void TestAndConditions(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "Multiple AND conditions",
-            "SELECT * FROM employees WHERE age > 25 AND salary > 50000 AND status = 'active'");
+            "SELECT * FROM students WHERE GPA > 25 AND GPA > 50000 AND Email = 'active'");
     }
 
     private static void TestOrConditions(QueryOptimizerEngine optimizer)
     {
         // OR conditions may need special handling
         RunTest(optimizer, "Multiple OR conditions",
-            "SELECT * FROM employees WHERE department = 'HR' OR department = 'IT'");
+            "SELECT * FROM students WHERE DepartmentID = 'HR' OR DepartmentID = 'IT'");
     }
 
     private static void TestRangeCondition(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "Range condition (compound)",
-            "SELECT * FROM employees WHERE salary >= 40000 AND salary <= 80000");
+            "SELECT * FROM students WHERE GPA >= 40000 AND GPA <= 80000");
     }
 
     private static void TestBetweenLikeCondition(QueryOptimizerEngine optimizer)
     {
         RunTest(optimizer, "BETWEEN clause",
-            "SELECT * FROM employees WHERE age BETWEEN 25 AND 40");
+            "SELECT * FROM students WHERE GPA BETWEEN 25 AND 40");
     }
 
     #endregion
@@ -588,7 +588,7 @@ public static class EdgeCaseTester
         
         try
         {
-            var query = optimizer.ParseQuery("SELECT id, name FROM employees WHERE age > 30 ORDER BY name");
+            var query = optimizer.ParseQuery("SELECT StudentID, FullName FROM students WHERE GPA > 30 ORDER BY FullName");
             var plan = optimizer.OptimizeQuery(query);
             
             // Check that PlanTree exists
@@ -617,7 +617,7 @@ public static class EdgeCaseTester
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[FAIL] {ex.GetType().Name}: {ex.Message.Substring(0, Math.Min(40, ex.Message.Length))}...");
+            Console.WriteLine($"[FAIL] {ex.GetType().FullName}: {ex.Message.Substring(0, Math.Min(40, ex.Message.Length))}...");
             _failCount++;
             _failures.Add($"PlanTree generation: {ex.Message}");
         }
@@ -660,7 +660,7 @@ public static class EdgeCaseTester
         
         try
         {
-            var query = optimizer.ParseQuery("SELECT * FROM employees WHERE id > 5 ORDER BY name");
+            var query = optimizer.ParseQuery("SELECT * FROM students WHERE StudentID > 5 ORDER BY FullName");
             var plan = optimizer.OptimizeQuery(query);
             
             if (plan.PlanTree == null)
@@ -688,7 +688,7 @@ public static class EdgeCaseTester
             
             if (!isValidLeaf)
             {
-                Console.WriteLine($"[FAIL] Leaf node should be SCAN, got {leaf.GetType().Name}");
+                Console.WriteLine($"[FAIL] Leaf node should be SCAN, got {leaf.GetType().FullName}");
                 _failCount++;
                 _failures.Add($"PlanTree order: Leaf node should be SCAN");
                 return;
@@ -699,7 +699,7 @@ public static class EdgeCaseTester
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[FAIL] {ex.GetType().Name}: {ex.Message.Substring(0, Math.Min(40, ex.Message.Length))}...");
+            Console.WriteLine($"[FAIL] {ex.GetType().FullName}: {ex.Message.Substring(0, Math.Min(40, ex.Message.Length))}...");
             _failCount++;
             _failures.Add($"PlanTree order: {ex.Message}");
         }
@@ -709,7 +709,7 @@ public static class EdgeCaseTester
     {
         if (node == null) return null;
         
-        // Check if leaf node (scan nodes have no children)
+        // Check if leaf node
         switch (node)
         {
             case mDBMS.Common.QueryData.TableScanNode:
@@ -727,18 +727,18 @@ public static class EdgeCaseTester
             case mDBMS.Common.QueryData.AggregateNode agg:
                 return FindLeftmostLeaf(agg.Input);
             default:
-                return node; // Unknown node, treat as leaf
+                return node; // Unknown node, dianggap leaf
         }
     }
 
     private static void TestPlanCostCalculation(QueryOptimizerEngine optimizer)
     {
         // Verify that cost is calculated correctly
-        Console.Write($"  [{(_passCount + _failCount + 1):D2}] {"Plan cost calculation",-40} ");
+        Console.Write($"  [{_passCount + _failCount + 1:D2}] {"Plan cost calculation",-40} ");
         
         try
         {
-            var query = optimizer.ParseQuery("SELECT * FROM employees");
+            var query = optimizer.ParseQuery("SELECT * FROM students");
             var plan = optimizer.OptimizeQuery(query);
             
             if (plan.TotalEstimatedCost <= 0)
@@ -758,13 +758,12 @@ public static class EdgeCaseTester
             }
 
             // Verify that complex queries have higher cost
-            var simpleQuery = optimizer.ParseQuery("SELECT * FROM employees");
+            var simpleQuery = optimizer.ParseQuery("SELECT * FROM students");
             var simplePlan = optimizer.OptimizeQuery(simpleQuery);
             
-            var complexQuery = optimizer.ParseQuery("SELECT * FROM employees WHERE age > 30 ORDER BY salary DESC");
+            var complexQuery = optimizer.ParseQuery("SELECT * FROM students WHERE GPA > 30 ORDER BY GPA DESC");
             var complexPlan = optimizer.OptimizeQuery(complexQuery);
             
-            // Note: Complex query might actually be cheaper if using index, so just verify both have positive costs
             if (complexPlan.TotalEstimatedCost <= 0)
             {
                 Console.WriteLine($"[FAIL] Complex query cost invalid");
@@ -778,7 +777,7 @@ public static class EdgeCaseTester
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[FAIL] {ex.GetType().Name}: {ex.Message.Substring(0, Math.Min(40, ex.Message.Length))}...");
+            Console.WriteLine($"[FAIL] {ex.GetType().FullName}: {ex.Message.Substring(0, Math.Min(40, ex.Message.Length))}...");
             _failCount++;
             _failures.Add($"Plan cost: {ex.Message}");
         }
@@ -790,7 +789,7 @@ public static class EdgeCaseTester
 
     private static void RunTest(QueryOptimizerEngine optimizer, string testName, string sql, bool expectFailure = false)
     {
-        Console.Write($"  [{(_passCount + _failCount + 1):D2}] {testName,-40} ");
+        Console.Write($"  [{_passCount + _failCount + 1:D2}] {testName,-40} ");
 
         try
         {
@@ -827,12 +826,12 @@ public static class EdgeCaseTester
         {
             if (expectFailure)
             {
-                Console.WriteLine($"[EXPECTED FAIL] {ex.GetType().Name}");
+                Console.WriteLine($"[EXPECTED FAIL] {ex.GetType().FullName}");
                 _passCount++;
             }
             else
             {
-                Console.WriteLine($"[FAIL] {ex.GetType().Name}: {ex.Message.Substring(0, Math.Min(50, ex.Message.Length))}...");
+                Console.WriteLine($"[FAIL] {ex.GetType().FullName}: {ex.Message.Substring(0, Math.Min(50, ex.Message.Length))}...");
                 _failCount++;
                 _failures.Add($"{testName}: {ex.Message}");
             }
@@ -855,7 +854,7 @@ public static class EdgeCaseTester
             {
                 // Validate DML has proper parsed structure
                 if (string.IsNullOrWhiteSpace(query.Table))
-                    return (false, "DML query missing table name");
+                    return (false, "DML query missing table FullName");
                     
                 // UPDATE must have UpdateOperations
                 if (query.Type == QueryType.UPDATE && 
@@ -897,7 +896,7 @@ public static class EdgeCaseTester
 
         // Verify leaf is a scan node
         bool isValidLeaf = leaf is TableScanNode || leaf is IndexScanNode || leaf is IndexSeekNode;
-        if (!isValidLeaf) return (false, $"Leaf node should be SCAN, got {leaf.GetType().Name}");
+        if (!isValidLeaf) return (false, $"Leaf node should be SCAN, got {leaf.GetType().FullName}");
 
         // For SELECT with columns, verify ProjectNode exists (unless SELECT *)
         if (query.Type == QueryType.SELECT && 
@@ -1013,3 +1012,4 @@ public static class EdgeCaseTester
 
     #endregion
 }
+

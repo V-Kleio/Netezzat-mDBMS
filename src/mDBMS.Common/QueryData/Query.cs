@@ -17,7 +17,8 @@ public enum JoinType {
     INNER,
     LEFT,
     RIGHT,
-    FULL
+    FULL,
+    CROSS
 }
 
 /// <summary>
@@ -44,6 +45,7 @@ public class Query {
     /// Tabel query target
     /// </summary>
     public string Table { get; set; } = string.Empty;
+    public List<string>? FromTables { get; set; }
 
     /// <summary>
     /// Kolom yang dipilih
@@ -54,7 +56,7 @@ public class Query {
     /// Mapping kolom dan nilai baru untuk UPDATE
     /// </summary>
     public Dictionary<string, string> UpdateOperations { get; set; } = new Dictionary<string, string>();
-    
+
     /// <summary>
     /// Kondisi WHERE
     /// </summary>

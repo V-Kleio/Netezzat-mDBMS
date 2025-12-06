@@ -42,7 +42,7 @@ namespace mDBMS.QueryProcessor.Transaction
                 Message = undoSuccess 
                     ? $"Transaksi {transactionId} telah di-ABORT dan UNDO berhasil." 
                     : $"Transaksi {transactionId} di-ABORT, namun UNDO gagal.",
-                TransactionId = transactionId,
+                TransactionId = -1,
             };
         }
     }

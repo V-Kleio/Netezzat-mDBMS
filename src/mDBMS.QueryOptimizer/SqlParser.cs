@@ -44,6 +44,21 @@ internal sealed class SqlParser
         };
     }
 
+    private List<string> ParseTableList()
+    {
+        var tables = new List<string>
+        {
+            ParseIdentifier()
+        };
+
+        while (Match(SqlTokenType.COMMA))
+        {
+            tables.Add(ParseIdentifier());
+        }
+
+        return tables;
+    }
+
     /// <summary>
     /// Parse SELECT ... FROM ... [JOIN ... ON ...]* [WHERE ...] [GROUP BY ...] [ORDER BY ...]
     /// </summary>
@@ -54,13 +69,27 @@ internal sealed class SqlParser
         Expect(SqlTokenType.SELECT);
         q.SelectedColumns = ParseSelectList();
         Expect(SqlTokenType.FROM);
-        q.Table = ParseIdentifier();
+        var tables = ParseTableList();
+
+        Console.WriteLine($"[SqlParser] Parsed {tables.Count} tables from FROM clause: {string.Join(", ", tables)}");
+
+        if (tables.Count == 1)
+        {
+            q.Table = tables[0];
+            q.FromTables = null;
+        }
+        else
+        {
+            q.Table = tables[0];
+            q.FromTables = tables;
+        }
 
         // JOINs
         var joins = new List<JoinOperation>();
         while (IsJoinStart())
         {
-            joins.Add(ParseJoin(q.Table));
+            string leftTable = tables.Count > 1 ? string.Join(",", tables) : q.Table;
+            joins.Add(ParseJoin(leftTable));
         }
         if (joins.Count > 0) q.Joins = joins;
 
@@ -238,7 +267,7 @@ internal sealed class SqlParser
         if (Peek().Type == SqlTokenType.WHERE || Peek().Type == SqlTokenType.EOF)
             throw new InvalidOperationException("SET clause cannot be empty");
         do {
-            var col = ParseIdentifier();
+            var col = ParseIdentifierWithOptionalDot();
             if (updates.ContainsKey(col))
             {
                 throw new InvalidOperationException($"Duplicate column in SET list: {col}");
@@ -381,8 +410,16 @@ internal sealed class SqlParser
             var t = Peek();
             if (stopTokens.Contains(t.Type)) break;
             if (t.Type == SqlTokenType.EOF) break;
-            sb.Append(Consume().Lexeme);
-            sb.Append(' ');
+
+            var lexeme = Consume().Lexeme;
+            sb.Append(lexeme);
+
+            var next = Peek();
+            if (next.Type != SqlTokenType.DOT && t.Type != SqlTokenType.DOT &&
+                next.Type != SqlTokenType.EOF && !stopTokens.Contains(next.Type))
+            {
+                sb.Append(' ');
+            }
         }
         return sb.ToString();
     }

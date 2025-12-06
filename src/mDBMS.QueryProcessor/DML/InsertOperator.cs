@@ -42,10 +42,15 @@ public partial class Operator : IPlanNodeVisitor<IEnumerable<Row>>
         int index = 0;
         foreach (var (column, value) in newData)
         {
-            conditions[index].lhs = column;
-            conditions[index].rhs = value;
-            conditions[index].opr = Condition.Operation.EQ;
-            conditions[index].rel = Condition.Relation.COLUMN_AND_VALUE;
+            conditions[index] = new()
+            {
+                lhs = column,
+                rhs = value,
+                opr = Condition.Operation.EQ,
+                rel = Condition.Relation.COLUMN_AND_VALUE
+            };
+
+            Console.WriteLine($"       {column} = {value}");
 
             index++;
         }
