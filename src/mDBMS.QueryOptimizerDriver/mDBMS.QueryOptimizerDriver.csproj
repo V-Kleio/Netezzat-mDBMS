@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\mDBMS.QueryOptimizer\mDBMS.QueryOptimizer.csproj" />
     <ProjectReference Include="..\mDBMS.Common\mDBMS.Common.csproj" />
+    <ProjectReference Include="..\mDBMS.StorageManager\mDBMS.StorageManager.csproj" />
   </ItemGroup>
 
 </Project>
