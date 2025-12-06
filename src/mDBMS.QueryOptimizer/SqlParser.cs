@@ -381,8 +381,16 @@ internal sealed class SqlParser
             var t = Peek();
             if (stopTokens.Contains(t.Type)) break;
             if (t.Type == SqlTokenType.EOF) break;
-            sb.Append(Consume().Lexeme);
-            sb.Append(' ');
+
+            var lexeme = Consume().Lexeme;
+            sb.Append(lexeme);
+
+            var next = Peek();
+            if (next.Type != SqlTokenType.DOT && t.Type != SqlTokenType.DOT &&
+                next.Type != SqlTokenType.EOF && !stopTokens.Contains(next.Type))
+            {
+                sb.Append(' ');
+            }
         }
         return sb.ToString();
     }
