@@ -11,32 +11,32 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
 {
     private readonly IConcurrencyControlManager _protocolManager;
     private readonly ConcurrencyProtocol _protocol;
-    
+
     /// <summary>
     /// Konstruktor dengan pemilihan protocol
     /// </summary>
     /// <param name="protocol">Protocol yang akan digunakan</param>
-    public ConcurrencyControlManager(ConcurrencyProtocol protocol = ConcurrencyProtocol.TwoPhaseeLocking)
+    public ConcurrencyControlManager(ConcurrencyProtocol protocol = ConcurrencyProtocol.TwoPhaseLocking)
     {
         _protocol = protocol;
-        
+
         // Factory pattern: buat manager sesuai protocol yang dipilih
         _protocolManager = protocol switch
         {
-            ConcurrencyProtocol.TwoPhaseeLocking => new TwoPhaseeLockingManager(),
+            ConcurrencyProtocol.TwoPhaseLocking => new TwoPhaseLockingManager(),
             ConcurrencyProtocol.TimestampOrdering => new TimestampOrderingManager(),
             ConcurrencyProtocol.OptimisticValidation => new OptimisticConcurrencyManager(),
             _ => throw new ArgumentException($"Unknown protocol: {protocol}")
         };
-        
+
         Console.WriteLine($"[CCM] ConcurrencyControlManager initialized with protocol: {protocol}");
     }
-    
+
     /// <summary>
     /// Get current protocol being used
     /// </summary>
     public ConcurrencyProtocol GetProtocol() => _protocol;
-    
+
     /// <summary>
     /// Memulai transaksi baru
     /// </summary>
@@ -44,7 +44,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         return _protocolManager.BeginTransaction();
     }
-    
+
     /// <summary>
     /// Memvalidasi apakah aksi pada objek diizinkan
     /// </summary>
@@ -52,7 +52,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         return _protocolManager.ValidateObject(action);
     }
-    
+
     /// <summary>
     /// Mencatat (log) sebuah objek pada transaksi tertentu
     /// </summary>
@@ -60,7 +60,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         _protocolManager.LogObject(obj, transactionId);
     }
-    
+
     /// <summary>
     /// Mengakhiri transaksi (commit atau abort)
     /// </summary>
@@ -68,7 +68,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         return _protocolManager.EndTransaction(transactionId, commit);
     }
-    
+
     /// <summary>
     /// Abort transaksi
     /// </summary>
@@ -76,7 +76,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         return _protocolManager.AbortTransaction(transactionId);
     }
-    
+
     /// <summary>
     /// Commit transaksi
     /// </summary>
@@ -84,7 +84,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         return _protocolManager.CommitTransaction(transactionId);
     }
-    
+
     /// <summary>
     /// Mendapatkan status transaksi
     /// </summary>
@@ -92,7 +92,7 @@ public class ConcurrencyControlManager : IConcurrencyControlManager
     {
         return _protocolManager.GetTransactionStatus(transactionId);
     }
-    
+
     /// <summary>
     /// Memeriksa apakah transaksi aktif
     /// </summary>

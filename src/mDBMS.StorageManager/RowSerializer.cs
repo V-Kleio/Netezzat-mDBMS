@@ -33,7 +33,11 @@ namespace mDBMS.StorageManager
 
                         case DataType.String:
                             string strVal = value as string ?? string.Empty;
-                            if (strVal.Length > col.Length) strVal = strVal.Substring(0, col.Length);
+                            if (strVal.Length > col.Length)
+                            {
+                                Console.WriteLine($"[WARNING] String truncated for column '{col.Name}': '{strVal}' -> '{strVal[..col.Length]}'");
+                                strVal = strVal[..col.Length];
+                            }
 
                             byte[] strBytes = new byte[col.Length];
                             Encoding.ASCII.GetBytes(strVal).CopyTo(strBytes, 0);

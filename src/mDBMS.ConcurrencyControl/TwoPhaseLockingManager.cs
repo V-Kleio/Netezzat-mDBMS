@@ -54,7 +54,7 @@ public class TransactionState
 /// <summary>
 /// Two-Phase Locking Manager menggunakan 2PL Protocol dengan Deadlock Detection
 /// </summary>
-public class TwoPhaseeLockingManager : IConcurrencyControlManager
+public class TwoPhaseLockingManager : IConcurrencyControlManager
 {
     private int _nextTransactionId = 1;
     private readonly object _lockObject = new();
@@ -71,7 +71,7 @@ public class TwoPhaseeLockingManager : IConcurrencyControlManager
     // Object access log untuk audit trail
     private readonly ConcurrentDictionary<int, List<(DatabaseObject obj, DateTime accessedAt)>> _objectAccessLog;
 
-    public TwoPhaseeLockingManager()
+    public TwoPhaseLockingManager()
     {
         _transactions = new ConcurrentDictionary<int, TransactionState>();
         _lockTable = new ConcurrentDictionary<string, List<Lock>>();
@@ -305,10 +305,10 @@ public class TwoPhaseeLockingManager : IConcurrencyControlManager
                 }
 
                 // Detect deadlock
-                if (DetectDeadlock(transactionId))
+                if (DetectDeadlock(transactionId, out int victimTxnId))
                 {
                     Console.WriteLine($"[2PL] DEADLOCK DETECTED: T{transactionId} aborted");
-                    AbortTransaction(transactionId);
+                    AbortTransaction(victimTxnId);
                     return Response.CreateDenied(transactionId, "Deadlock detected - transaction aborted", obj, actionType);
                 }
 
@@ -389,29 +389,36 @@ public class TwoPhaseeLockingManager : IConcurrencyControlManager
     /// <summary>
     /// Deteksi deadlock menggunakan cycle detection pada wait-for graph
     /// </summary>
-    private bool DetectDeadlock(int transactionId)
+    private bool DetectDeadlock(int transactionId, out int victimTxnId)
     {
         var visited = new HashSet<int>();
         var recursionStack = new HashSet<int>();
+        var cycleParticipants = new HashSet<int>();
 
-        return HasCycle(transactionId, visited, recursionStack);
+        if (HasCycle(transactionId, visited, recursionStack, cycleParticipants))
+        {
+            // Select youngest transaction (highest ID) as victim
+            victimTxnId = cycleParticipants.Max();
+            return true;
+        }
+
+        victimTxnId = -1;
+        return false;
     }
 
     /// <summary>
     /// DFS untuk mendeteksi cycle dalam wait-for graph
     /// </summary>
-    private bool HasCycle(int txnId, HashSet<int> visited, HashSet<int> recursionStack)
+    private bool HasCycle(int txnId, HashSet<int> visited, HashSet<int> recursionStack, HashSet<int> cycleParticipants)
     {
         if (recursionStack.Contains(txnId))
         {
-            // Cycle detected
+            cycleParticipants.Add(txnId);
             return true;
         }
 
         if (visited.Contains(txnId))
-        {
             return false;
-        }
 
         visited.Add(txnId);
         recursionStack.Add(txnId);
@@ -420,8 +427,10 @@ public class TwoPhaseeLockingManager : IConcurrencyControlManager
         {
             foreach (var waitTxn in waitingFor.ToList())
             {
-                if (HasCycle(waitTxn, visited, recursionStack))
+                if (HasCycle(waitTxn, visited, recursionStack, cycleParticipants))
                 {
+                    cycleParticipants.Add(txnId);
+                    recursionStack.Remove(txnId);
                     return true;
                 }
             }
