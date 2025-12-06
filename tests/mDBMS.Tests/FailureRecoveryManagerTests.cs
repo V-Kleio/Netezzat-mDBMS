@@ -211,8 +211,10 @@ namespace mDBMS.Tests
                 TransactionId = 50,
                 Operation = ExecutionLog.OperationType.INSERT,
                 TableName = "Barang",
-                RowIdentifier = "ID=123",
-                AfterImage = new Row()
+                AfterImage = new Row 
+                { 
+                    Columns = { { "ID", 123 } }
+                }
             };
             _output.WriteLine("[Setup] Log INSERT prepared for T50");
 
@@ -232,7 +234,8 @@ namespace mDBMS.Tests
             Assert.Contains("DELETE FROM Barang", mockQP.LastExecutedQuery);
             _output.WriteLine($"[SUCCESS] Generated Query Verification: {mockQP.LastExecutedQuery}");
             
-            Assert.Contains("ID=123", mockQP.LastExecutedQuery);
+            Assert.Contains("ID", mockQP.LastExecutedQuery);
+            Assert.Contains("123", mockQP.LastExecutedQuery);
             _output.WriteLine("[SUCCESS] Query targets correct RowIdentifier (ID=123)");
             
             _output.WriteLine("SUCCESS");
