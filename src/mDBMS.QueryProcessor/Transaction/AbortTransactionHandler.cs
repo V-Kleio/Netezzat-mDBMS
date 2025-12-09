@@ -34,6 +34,8 @@ namespace mDBMS.QueryProcessor.Transaction
             
             // 2. Panggil FRM untuk melakukan UNDO Recovery
             bool undoSuccess = _failureRecoveryManager.UndoTransaction(transactionId);
+            LogEntry logEntry = LogEntry.CreateAbort(0, transactionId);
+            _failureRecoveryManager.WriteLogEntry(logEntry);
             
             return new ExecutionResult()
             {

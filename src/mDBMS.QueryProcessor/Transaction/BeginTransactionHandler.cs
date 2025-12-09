@@ -30,6 +30,8 @@ namespace mDBMS.QueryProcessor.Transaction
             }
 
             transactionId = _concurrencyControlManager.BeginTransaction();
+            LogEntry logEntry = LogEntry.CreateBeginTransaction(0, transactionId);
+            _failureRecoveryManager.WriteLogEntry(logEntry);
 
             return new ExecutionResult()
             {

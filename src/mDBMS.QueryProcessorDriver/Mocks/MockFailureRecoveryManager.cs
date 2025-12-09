@@ -33,6 +33,11 @@ public class MockFailureRecoveryManager : IFailureRecoveryManager
         _observer.Record($"FailureRecoveryManager.WriteLog");
     }
 
+    public void WriteLogEntry(LogEntry log)
+    {
+        _observer.Record($"FailureRecoveryManager.WriteLog");
+    }
+
     public void Recover(RecoverCriteria criteria)
     {
         _observer.Record("FailureRecoveryManager.Recover");

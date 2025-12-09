@@ -1,6 +1,6 @@
 using mDBMS.Common.Data;
 
-namespace mDBMS.FailureRecovery
+namespace mDBMS.Common.Transaction
 {
     /// Enum untuk tipe operasi dalam log
     public enum LogOperationType

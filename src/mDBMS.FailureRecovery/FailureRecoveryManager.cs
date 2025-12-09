@@ -32,7 +32,7 @@ namespace mDBMS.FailureRecovery
             _queryProcessor = queryProcessor;
             _storageManager = storageManager;
 
-            _logDirectory = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+            _logDirectory = Path.Combine(Directory.GetCurrentDirectory(), "../../logs");
             _logFilePath = Path.Combine(_logDirectory, "mDBMS.log");
             _currentLSN = 0;
 
