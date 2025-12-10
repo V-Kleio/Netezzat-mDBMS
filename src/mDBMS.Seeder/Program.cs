@@ -32,7 +32,8 @@ class Program
                 Directory.CreateDirectory(dataPath);
             }
 
-            Seeder.RunSeeder(dataPath);
+            // Seeder.RunSeeder(dataPath);
+            FinalSeeder.Run(dataPath);
 
             ShowDatabaseStats(dataPath);
         }
@@ -92,8 +93,9 @@ class Program
         Console.WriteLine("Database Statistics");
         Console.WriteLine("==============================================");
 
-        string[] tables = { "students.dat", "courses.dat", "enrollments.dat",
-                           "departments.dat", "instructors.dat" };
+        // string[] tables = { "students.dat", "courses.dat", "enrollments.dat",
+        //                    "departments.dat", "instructors.dat" };
+        string[] tables = { "student.dat", "course.dat", "attends.dat" };
 
         long totalSize = 0;
 
